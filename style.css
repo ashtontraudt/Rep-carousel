@@ -93,8 +93,11 @@ textarea#src:focus, select:focus { outline: 2px solid var(--orange); outline-off
 .carousel {
   display: flex; overflow-x: auto; scroll-snap-type: x mandatory; gap: 16px;
   scrollbar-width: none; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain;
-  padding-bottom: 4px;
+  padding-bottom: 4px; align-items: flex-start; overflow-y: hidden;
+  transition: height .2s ease;
 }
+@media (prefers-reduced-motion: reduce) { .carousel { transition: none; } }
+.panel { scroll-margin-top: 84px; }
 .carousel::-webkit-scrollbar { display: none; }
 .slide-card {
   flex: 0 0 100%; scroll-snap-align: center; scroll-snap-stop: always;
@@ -194,3 +197,13 @@ select { min-height: 44px; border-radius: 10px; border: 1px solid var(--line); b
 .ask-card { max-width: 400px; border-radius: 18px; gap: 14px; }
 .ask-card p { margin: 0; font-size: 16px; font-weight: 500; }
 .ask-row { justify-content: flex-end; }
+
+.slide-warn:empty { display: none; }
+.slide-warn { width: 100%; max-width: 420px; font-size: 13px; color: #9b3d1a; background: #fbe7d6; border-radius: 8px; padding: 8px 10px; }
+.slide-warn div + div { margin-top: 3px; }
+/* keep long slot names from widening a slide card past the carousel */
+.slide-card { min-width: 0; }
+.slots { grid-template-columns: minmax(0, 1fr); }
+.slot-row { min-width: 0; }
+.slot-name { white-space: normal; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; line-height: 1.25; }
+.slot-name small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

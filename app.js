@@ -29,7 +29,7 @@
     reference: (f) => {
       const n = Math.max(1, Math.min(4, f.labels.length || 1));
       const out = [{ key: 'target', label: 'Target muscle', cat: 'Muscle' }];
-      for (let i = 0; i < n; i++) out.push({ key: 'ex' + i, label: f.labels[i] ? `Exercise: ${f.labels[i]}` : `Exercise ${i + 1}`, cat: 'Exercise' });
+      for (let i = 0; i < n; i++) out.push({ key: 'ex' + i, label: f.labels[i] || `Exercise ${i + 1}`, cat: 'Exercise' });
       return out;
     },
   };
@@ -168,46 +168,77 @@ Use lighter weights and slow down the lowering phase.`;
   };
   const LIST_KEYS = new Set(['bullets', 'labels']);
 
+  const REQUIRED = {
+    cover: [['title', 'accent']], tip: ['headline'], rank: ['name', 'rating'], tier: ['letter', 'verdict'],
+    reference: ['headline', 'labels'], cta: ['headline'], explainer: ['headline'],
+  };
+  function editDistance(a, b) {
+    const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+    for (let j = 1; j <= b.length; j++) d[0][j] = j;
+    for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++) d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    return d[a.length][b.length];
+  }
+
   function parse(src) {
-    const blocks = src.replace(/\r\n?/g, '\n').split(/^\s*---+\s*$/m);
+    const all = src.replace(/\r\n?/g, '\n').split('\n');
+    // group lines into blocks separated by --- lines, remembering line numbers
+    const blocks = [[]];
+    all.forEach((text, n) => { if (/^\s*-{3,}\s*$/.test(text)) blocks.push([]); else blocks[blocks.length - 1].push({ text, n: n + 1 }); });
     const slides = [], errors = [];
-    blocks.forEach((block, bi) => {
-      const lines = block.split('\n');
-      let i = 0;
-      while (i < lines.length && !lines[i].trim()) i++;
-      if (i >= lines.length) return;
-      const m = lines[i].trim().match(/^\[\s*([a-zA-Z]+)\s*\]$/);
-      if (!m) { errors.push(`Block ${bi + 1}: first line should be a type like [cover]`); return; }
+    for (const lines of blocks) {
+      const body = lines.filter((l) => l.text.trim());
+      if (!body.length) continue; // empty block from extra --- lines: ignore
+      const first = body[0];
+      const where = `Line ${first.n}`;
+      const m = first.text.trim().match(/^\[\s*([a-zA-Z]+)\s*\]$/);
+      if (!m) { errors.push(`${where}: a slide must start with its type in brackets, like [cover]. Found "${first.text.trim().slice(0, 40)}". This block was skipped.`); continue; }
       const type = m[1].toLowerCase();
-      if (!KEYS[type]) { errors.push(`Block ${bi + 1}: unknown type [${type}]`); return; }
+      if (!KEYS[type]) { errors.push(`${where}: unknown slide type [${m[1]}]. Use one of: ${Object.keys(KEYS).map((k) => '[' + k + ']').join(' ')}. This block was skipped.`); continue; }
+      const slideNo = slides.length + 1;
+      const tag = `Slide ${slideNo} [${type}]`;
       const raw = {};
       let cur = null;
-      for (i = i + 1; i < lines.length; i++) {
-        const line = lines[i];
-        const km = line.match(/^\s*([a-zA-Z]+)\s*:\s?(.*)$/);
-        if (km && KEYS[type].includes(km[1].toLowerCase())) {
-          cur = km[1].toLowerCase();
+      for (const { text, n } of body.slice(1)) {
+        const km = text.match(/^\s*([a-zA-Z]+)\s*:\s?(.*)$/);
+        const key = km && km[1].toLowerCase();
+        if (km && KEYS[type].includes(key)) {
+          cur = key;
           raw[cur] = raw[cur] || [];
           if (km[2].trim()) raw[cur].push(km[2].trim());
-        } else if (cur && line.trim()) {
-          raw[cur].push(line.trim());
+          continue;
         }
+        if (km) {
+          const close = KEYS[type].find((k) => editDistance(k, key) <= 2);
+          if (close || !cur) {
+            errors.push(`${tag}, line ${n}: unknown field "${km[1]}"${close ? ` (did you mean "${close}"?)` : ''}. Fields for [${type}]: ${KEYS[type].join(', ')}.`);
+            continue;
+          }
+        }
+        if (cur) raw[cur].push(text.trim());
+        else errors.push(`${tag}, line ${n}: text outside any field was ignored. Start the line with a field name, like "${KEYS[type][0]}:".`);
       }
       const f = {};
       for (const k of KEYS[type]) {
         const arr = raw[k] || [];
-        if (LIST_KEYS.has(k)) f[k] = arr.map((s) => s.replace(/^[-•*]\s+/, '')).filter(Boolean);
+        if (LIST_KEYS.has(k)) f[k] = arr.map((x) => x.replace(/^[-•*]\s+/, '')).filter(Boolean);
         else if (type === 'cover' && (k === 'title' || k === 'accent')) f[k] = arr;
         else f[k] = arr.join('\n');
       }
+      const missing = REQUIRED[type].filter((r) => (Array.isArray(r) ? r : [r]).every((k) => !f[k] || !f[k].length)).map((r) => (Array.isArray(r) ? r.join(' or ') : r));
+      if (missing.length) errors.push(`${tag}: missing ${missing.join(', ')}.`);
       if (type === 'rank') {
         const r = parseFloat(String(f.rating).replace(',', '.'));
+        if (f.rating && (isNaN(r) || r < 0 || r > 5)) errors.push(`${tag}: rating "${f.rating}" should be a number from 0 to 5 (halves allowed).`);
         f.rating = isNaN(r) ? 0 : Math.max(0, Math.min(5, Math.round(r * 2) / 2));
       }
-      if (type === 'tier') f.letter = (f.letter || 'S').trim().charAt(0).toUpperCase();
-      if (type === 'reference' && f.labels.length > 4) { errors.push(`Block ${bi + 1}: reference supports up to 4 labels — extra ones ignored`); f.labels = f.labels.slice(0, 4); }
+      if (type === 'tier') {
+        const L = (f.letter || '').trim().toUpperCase();
+        if (L && !TIER_COLORS[L.charAt(0)]) errors.push(`${tag}: tier letter "${f.letter}" should be one of S, A, B, C, D, F.`);
+        f.letter = L.charAt(0);
+      }
+      if (type === 'reference' && f.labels.length > 4) { errors.push(`${tag}: up to 4 labels are supported. Extra ones were ignored.`); f.labels = f.labels.slice(0, 4); }
       slides.push({ type, f });
-    });
+    }
     return { slides, errors };
   }
 
@@ -257,13 +288,48 @@ Use lighter weights and slow down the lowering phase.`;
     }
     return out;
   }
+  // Warnings collected while rendering the current slide (shown under the slide card).
+  let renderWarnings = null;
+  function warn(msg) { if (renderWarnings && !renderWarnings.includes(msg)) renderWarnings.push(msg); }
+
+  function lineWidth(ctx, words, o, size) {
+    ctx.font = o.font(size, false);
+    const spaceW = ctx.measureText(' ').width;
+    return words.reduce((a, w, i) => a + (i ? spaceW : 0) + wordWidth(ctx, w, o.font, size), 0);
+  }
+  // Shorten a line until it (plus an ellipsis) fits maxW.
+  function ellipsize(ctx, line, o, size) {
+    const words = line.words.map((w) => ({ ...w, segs: w.segs.map((sg) => ({ ...sg })) }));
+    const ell = () => { const last = words[words.length - 1]; const sg = last.segs[last.segs.length - 1]; sg.t = sg.t.replace(/[\s.,;:!?…-]+$/, '') + '…'; };
+    if (!words.length) return line;
+    ell();
+    while (lineWidth(ctx, words, o, size) > o.maxW) {
+      const last = words[words.length - 1];
+      if (words.length > 1 && last.segs.map((x) => x.t).join('').length <= 3) { words.pop(); ell(); continue; }
+      const sg = last.segs[last.segs.length - 1];
+      if (sg.t.length <= 1) { last.segs.pop(); if (!last.segs.length) words.pop(); if (!words.length) break; ell(); continue; }
+      sg.t = sg.t.slice(0, -2) + '…';
+    }
+    return { words, width: lineWidth(ctx, words, o, size) };
+  }
   function fitRich(ctx, text, o) {
     let size = o.size;
+    const maxLines = o.maxLines || 99;
     for (;;) {
-      const lines = wrapRich(ctx, text, o.font, size, o.maxW, o.upper);
+      let lines = wrapRich(ctx, text, o.font, size, o.maxW, o.upper);
       const tooWide = lines.some((l) => l.width > o.maxW + 0.5);
       const h = lines.length * size * o.lh;
-      if ((!tooWide && lines.length <= (o.maxLines || 99) && (!o.maxH || h <= o.maxH)) || size <= o.min) return { lines, size };
+      const fits = !tooWide && lines.length <= maxLines && (!o.maxH || h <= o.maxH);
+      if (fits) return { lines, size };
+      if (size - 2 < o.min) {
+        // Still too big at the smallest size: cut lines and add an ellipsis instead of overflowing.
+        let keep = Math.min(lines.length, maxLines);
+        if (o.maxH) keep = Math.min(keep, Math.max(1, Math.floor(o.maxH / (size * o.lh) + 0.001)));
+        const cut = keep < lines.length;
+        lines = lines.slice(0, keep).map((l, i) => ((cut && i === keep - 1) || l.width > o.maxW + 0.5 ? ellipsize(ctx, l, o, size) : l));
+        if (o.name) warn(`${o.name} is too long to fit and was shortened with "…".`);
+        return { lines, size, cut: true };
+      }
       size -= 2;
     }
   }
@@ -400,19 +466,54 @@ Use lighter weights and slow down the lowering phase.`;
   const TOP = M + 52 + 64; // content start below header
 
   // ---------- Slide renderers ----------
+  const IMG_MIN = 320;            // smallest height an image area may shrink to
+  const BOTTOM = H - M;           // bottom of the safe area
+  const HEAD_O = (size, min, extra) => ({ font: HEAD, size, min, lh: 1.04, ascent: 0.86, maxW: W - 2 * M, color: C.charcoal, ...extra });
+  const BODY_O = (size, min, extra) => ({ font: BODY, size, min, lh: 1.38, ascent: 0.78, maxW: W - 2 * M, color: C.gray, ...extra });
+  // Missing text: show a hint in the preview, leave it out of exported PNGs.
+  const hint = (R, v, d) => (v && String(v).trim() ? v : R.exporting ? '' : d);
+
+  // Small all-caps label with wide letter spacing; shrinks, then shortens, to fit maxW.
+  function spacedLabel(ctx, text, x, y, maxW, align, name) {
+    let size = 30, t = text.toUpperCase();
+    const sp = (s) => s * 0.2;
+    for (; size > 22; size -= 1) { ctx.font = SEMI(size); if (spacedWidth(ctx, t, sp(size)) <= maxW) break; }
+    ctx.font = SEMI(size);
+    if (spacedWidth(ctx, t, sp(size)) > maxW) {
+      while (t.length > 1 && spacedWidth(ctx, t + '…', sp(size)) > maxW) t = t.slice(0, -1);
+      t = t.replace(/\s+$/, '') + '…';
+      warn(`${name} is too long to fit and was shortened with "…".`);
+    }
+    ctx.fillStyle = C.gray;
+    drawSpaced(ctx, t, x, y, sp(size), align);
+  }
+
   const RENDER = {
     cover(ctx, f, R) {
       const segs = [];
       f.title.forEach((t) => segs.push({ t, color: C.charcoal }));
       f.accent.forEach((t) => segs.push({ t, color: C.orange }));
-      if (!segs.length) segs.push({ t: 'Your title', color: C.charcoal });
-      const maxW = W - 2 * M, lh = 0.98;
+      if (!segs.length && !R.exporting) segs.push({ t: 'Your title', color: C.charcoal });
+      const maxW = W - 2 * M, lh = 0.98, maxH = 600;
+      const o = { font: HEAD, maxW, upper: true };
       let size = 170, laid;
       for (;;) {
         laid = segs.map((s) => ({ ...s, lines: wrapRich(ctx, s.t.replace(/\*\*/g, ''), HEAD, size, maxW, true) }));
         const n = laid.reduce((a, s) => a + s.lines.length, 0);
         const wide = laid.some((s) => s.lines.some((l) => l.width > maxW));
-        if ((!wide && n * size * lh <= 560) || size <= 60) break;
+        if (!wide && n * size * lh <= maxH) break;
+        if (size <= 64) {
+          // cut extra lines from the end and mark with an ellipsis
+          let room = Math.floor(maxH / (size * lh));
+          for (const s of laid) {
+            s.lines = s.lines.slice(0, Math.max(0, room)).map((l) => (l.width > maxW ? ellipsize(ctx, l, o, size) : l));
+            room -= s.lines.length;
+          }
+          const last = [...laid].reverse().find((s) => s.lines.length);
+          if (last) last.lines[last.lines.length - 1] = ellipsize(ctx, last.lines[last.lines.length - 1], o, size);
+          warn('Title and accent are too long to fit and were shortened with "…".');
+          break;
+        }
         size -= 4;
       }
       let y = TOP - 10;
@@ -422,17 +523,14 @@ Use lighter weights and slow down the lowering phase.`;
       if (f.sub) {
         y += 26;
         const sub = f.sub.trim().replace(/^\(|\)$/g, '');
-        const r = richBlock(ctx, `(${sub})`, W / 2, y, { font: BODY, size: 38, min: 26, lh: 1.3, maxW, maxLines: 2, color: C.gray, align: 'center' });
-        y = r.bottom;
+        y = richBlock(ctx, `(${sub})`, W / 2, y, BODY_O(38, 28, { lh: 1.3, maxLines: 2, align: 'center', name: 'Sub line' })).bottom;
       }
       const top = Math.max(y + 40, H * 0.48);
-      const bleed = 70;
-      placeImage(ctx, R, 'main', { x: 40, y: top, w: W - 80, h: H - top + bleed }, { valign: 'bottom', label: 'Cover image' });
+      placeImage(ctx, R, 'main', { x: 40, y: top, w: W - 80, h: H - top + 70 }, { valign: 'bottom', label: 'Cover image' });
     },
 
     tip(ctx, f, R) {
       const num = `#${(f.number || '1').replace(/^#/, '')}`;
-      // badge
       const bh = 104;
       ctx.font = HEAD(68);
       const bw = Math.max(bh, ctx.measureText(num).width + 56);
@@ -449,72 +547,73 @@ Use lighter weights and slow down the lowering phase.`;
       ctx.fillText(num, M + bw / 2, by + bh / 2 + 3);
       ctx.textAlign = 'left';
       ctx.textBaseline = 'alphabetic';
-      // headline
-      const hx = M + bw + 32, hMax = W - M - hx;
-      const fit = fitRich(ctx, f.headline || 'Headline', { font: HEAD, size: 130, min: 54, lh: 1.0, maxW: hMax, maxLines: 1 });
-      const hy = by + bh / 2 - (fit.size * 1.0) / 2;
-      drawLines(ctx, fit.lines.slice(0, 1), hx, hy, fit.size, { font: HEAD, lh: 1.0, color: C.charcoal, ascent: 0.86 });
-      // bullets
-      let y = Math.max(by + bh, hy + fit.size) + 56;
-      const tx = M + 44, tMax = W - M - tx;
+      // headline beside the badge: up to 2 lines, first line centered on the badge
+      const hx = M + bw + 32;
+      const ho = HEAD_O(130, 64, { maxW: W - M - hx, maxLines: 2, name: 'Headline' });
+      const fit = fitRich(ctx, hint(R, f.headline, 'Headline'), ho);
+      const hy = by + bh / 2 - (fit.size * ho.lh) / 2;
+      const hBottom = drawLines(ctx, fit.lines, hx, hy, fit.size, ho);
+      let y = Math.max(by + bh, hBottom) + 52;
+      // bullets: shrink to leave the image at least IMG_MIN
+      const tx = M + 44;
+      const bo = BODY_O(40, 30, { maxW: W - M - tx });
+      const gap = 20;
+      const room = BOTTOM - IMG_MIN - 30 - y;
+      const heightAt = (sz) => f.bullets.reduce((a, b) => a + wrapRich(ctx, b, BODY, sz, bo.maxW).length * sz * bo.lh + gap, 0);
       let bsize = 40;
-      const bullets = f.bullets.length ? f.bullets : [];
-      // shrink bullets if they'd take too much room
-      for (;;) {
-        const total = bullets.reduce((a, b) => a + wrapRich(ctx, b, BODY, bsize, tMax).length * bsize * 1.38 + 22, 0);
-        if (total <= 420 || bsize <= 28) break;
-        bsize -= 2;
-      }
-      for (const b of bullets) {
-        const lines = wrapRich(ctx, b, BODY, bsize, tMax);
+      while (bsize > 30 && heightAt(bsize) > room) bsize -= 2;
+      let left = room;
+      for (let i = 0; i < f.bullets.length; i++) {
+        const lineH = bsize * bo.lh;
+        const maxLines = Math.floor((left - gap) / lineH);
+        if (maxLines < 1) { warn(`${f.bullets.length - i} bullet(s) didn't fit and were left out. Shorten the bullets or use fewer.`); break; }
+        const bf = fitRich(ctx, f.bullets[i], { ...bo, size: bsize, min: bsize, maxLines, name: `Bullet ${i + 1}` });
         ctx.fillStyle = C.orange;
         ctx.beginPath();
-        ctx.arc(M + 10, y + (bsize * 1.38) / 2, 8, 0, Math.PI * 2);
+        ctx.arc(M + 10, y + lineH / 2, 8, 0, Math.PI * 2);
         ctx.fill();
-        y = drawLines(ctx, lines, tx, y, bsize, { font: BODY, lh: 1.38, color: C.gray, ascent: 0.78 }) + 22;
+        const ny = drawLines(ctx, bf.lines, tx, y, bsize, bo) + gap;
+        left -= ny - y;
+        y = ny;
       }
-      const top = Math.max(y + 30, H * 0.5);
-      placeImage(ctx, R, 'main', { x: M, y: top, w: W - 2 * M, h: H - M + 20 - top }, { label: 'Tip image' });
+      const top = f.bullets.length ? Math.max(y + 20, H * 0.5) : y + 10;
+      placeImage(ctx, R, 'main', { x: M, y: top, w: W - 2 * M, h: BOTTOM + 20 - top }, { label: 'Tip image' });
     },
 
     rank(ctx, f, R) {
       const num = `#${(f.number || '1').replace(/^#/, '')}`;
       let y = TOP - 16;
-      ctx.font = HEAD(170);
+      let ns = 170;
+      ctx.font = HEAD(ns);
+      while (ns > 90 && ctx.measureText(num).width > W - 2 * M) { ns -= 10; ctx.font = HEAD(ns); }
       ctx.fillStyle = C.charcoal;
-      ctx.fillText(num, M, y + 170 * 0.86);
-      y += 170 + 6;
-      const nm = richBlock(ctx, f.name || 'Exercise name', M, y, { font: HEAD, size: 88, min: 50, lh: 1.02, maxW: W - 2 * M, maxLines: 2, color: C.orange, ascent: 0.86 });
-      y = nm.bottom + 30;
-      // plates
+      ctx.fillText(num, M, y + ns * 0.86);
+      y += ns + 6;
+      y = richBlock(ctx, hint(R, f.name, 'Exercise name'), M, y, HEAD_O(88, 54, { maxLines: 2, color: C.orange, name: 'Name' })).bottom + 28;
       const r = 30, gap = 18;
-      for (let i = 0; i < 5; i++) {
-        const cx = M + r + i * (2 * r + gap), cy = y + r;
-        const fill = Math.max(0, Math.min(1, f.rating - i));
-        drawPlate(ctx, cx, cy, r, fill);
-      }
+      for (let i = 0; i < 5; i++) drawPlate(ctx, M + r + i * (2 * r + gap), y + r, r, Math.max(0, Math.min(1, f.rating - i)));
       y += 2 * r + 36;
       y = divider(ctx, M, y) + 30;
       if (f.reason) {
-        y = richBlock(ctx, f.reason, M, y, { font: BODY, size: 38, min: 28, lh: 1.38, maxW: W - 2 * M, maxLines: 4, color: C.gray, ascent: 0.78 }).bottom;
+        y = richBlock(ctx, f.reason, M, y, BODY_O(38, 30, { maxLines: 4, maxH: BOTTOM - IMG_MIN - 36 - y, name: 'Reason' })).bottom;
       }
       const top = y + 36;
-      placeImage(ctx, R, 'main', { x: M, y: top, w: W - 2 * M, h: H - M + 20 - top }, { label: 'Exercise image' });
+      placeImage(ctx, R, 'main', { x: M, y: top, w: W - 2 * M, h: BOTTOM + 20 - top }, { label: 'Exercise image' });
     },
 
-    tier(ctx, f) {
-      const L = f.letter || 'S';
+    tier(ctx, f, R) {
+      const L = f.letter || (R.exporting ? '' : '?');
       const col = TIER_COLORS[L] || C.charcoal;
-      // measure verdict to vertically center the group
-      const vf = fitRich(ctx, f.verdict || '', { font: HEAD, size: 116, min: 60, lh: 1.02, maxW: W - 2 * M, maxLines: 3 });
+      const vo = HEAD_O(116, 64, { maxLines: 3, align: 'center', name: 'Verdict' });
+      const vf = fitRich(ctx, f.verdict || '', vo);
       const labelH = 34, badge = 440, gap1 = 42, gap2 = 64;
-      const vH = f.verdict ? vf.lines.length * vf.size * 1.02 : 0;
+      const vH = f.verdict ? vf.lines.length * vf.size * vo.lh : 0;
       const groupH = labelH + gap1 + badge + (vH ? gap2 + vH : 0);
-      const areaTop = TOP, areaH = H - M - TOP;
-      let y = areaTop + Math.max(0, (areaH - groupH) / 2) - 20;
+      const areaH = BOTTOM - TOP;
+      let y = TOP + Math.max(0, (areaH - groupH) / 2) - 20;
       ctx.font = SEMI(32);
       ctx.fillStyle = C.gray;
-      drawSpaced(ctx, `${L} TIER`, W / 2, y + 28, 8, 'center');
+      if (L) drawSpaced(ctx, `${L} TIER`, W / 2, y + 28, 8, 'center');
       y += labelH + gap1;
       ctx.save();
       badgeShadow(ctx);
@@ -530,78 +629,73 @@ Use lighter weights and slow down the lowering phase.`;
       ctx.textAlign = 'left';
       ctx.textBaseline = 'alphabetic';
       y += badge + gap2;
-      if (f.verdict) drawLines(ctx, vf.lines, W / 2, y, vf.size, { font: HEAD, lh: 1.02, color: C.charcoal, align: 'center', ascent: 0.86 });
+      if (f.verdict) drawLines(ctx, vf.lines, W / 2, y, vf.size, vo);
     },
 
     reference(ctx, f, R) {
       let y = TOP - 10;
       const leftW = 500;
-      const hd = richBlock(ctx, f.headline || 'Muscle', M, y, { font: HEAD, size: 110, min: 56, lh: 1.0, maxW: leftW, maxLines: 2, color: C.charcoal, ascent: 0.86 });
-      y = hd.bottom - 4;
+      y = richBlock(ctx, hint(R, f.headline, 'Muscle'), M, y, HEAD_O(110, 60, { maxW: leftW, maxLines: 2, name: 'Headline' })).bottom + 8;
       if (f.number) {
-        ctx.font = HEAD(230);
+        let ns = 230;
+        ctx.font = HEAD(ns);
+        while (ns > 120 && ctx.measureText(f.number).width > leftW) { ns -= 10; ctx.font = HEAD(ns); }
         ctx.fillStyle = C.orange;
-        ctx.fillText(f.number, M - 4, y + 230 * 0.86);
-        y += 230 + 10;
+        ctx.fillText(f.number, M - 4, y + ns * 0.86);
+        y += ns + 6;
       }
-      y = divider(ctx, M, y) + 26;
-      if (f.breakdown) {
-        y = richBlock(ctx, f.breakdown, M, y, { font: BODY, size: 34, min: 24, lh: 1.3, maxW: leftW, maxLines: 2, color: C.gray, ascent: 0.78 }).bottom;
-      }
+      y = divider(ctx, M, y + 6) + 26;
+      if (f.breakdown) y = richBlock(ctx, f.breakdown, M, y, BODY_O(34, 26, { lh: 1.3, maxW: leftW, maxLines: 2, name: 'Breakdown' })).bottom;
       // target muscle image top-right
-      const tX = M + leftW + 30, tW = W - M - tX;
-      placeImage(ctx, R, 'target', { x: tX, y: TOP - 10, w: tW, h: Math.max(240, y - TOP + 10) }, { label: 'Target muscle' });
+      const tX = M + leftW + 30, tW = W - M - tX, tTop = TOP - 10;
+      const tH = Math.max(260, y - tTop);
+      placeImage(ctx, R, 'target', { x: tX, y: tTop, w: tW, h: tH }, { label: 'Target muscle' });
 
-      // exercise grid
+      // exercise grid (1 = large, 2 = side by side, 3 = 2 + 1 centered, 4 = 2x2)
       const n = Math.max(1, Math.min(4, f.labels.length || 1));
-      const gTop = y + 48, gBottom = H - M + 10;
-      const gap = 30, labelH = 62;
-      const rows = n <= 2 ? 1 : 2;
-      const cols = n === 1 ? 1 : 2;
+      const gTop = Math.max(y, tTop + tH) + 44;
+      const gap = 30;
+      const rows = n <= 2 ? 1 : 2, cols = n === 1 ? 1 : 2;
       const cellW = (W - 2 * M - (cols - 1) * gap) / cols;
-      const cellH = (gBottom - gTop - (rows - 1) * gap) / rows;
+      const lo = { font: (s) => BODY(s, true), size: n === 1 ? 40 : 30, min: 24, lh: 1.15, ascent: 0.78, maxW: cellW - 10, maxLines: 2, color: C.gray, boldColor: C.orange, align: 'center' };
+      const fits = f.labels.slice(0, n).map((lab, i) => fitRich(ctx, lab, { ...lo, name: `Label ${i + 1}` }));
+      const labelLines = Math.max(1, ...fits.map((x) => x.lines.length));
+      const labelSize = Math.max(lo.min, ...fits.map((x) => x.size));
+      const labelH = 16 + labelLines * labelSize * lo.lh;
+      const cellH = (BOTTOM - gTop - (rows - 1) * gap) / rows;
       for (let i = 0; i < n; i++) {
-        let row = cols === 1 ? 0 : Math.floor(i / 2), col = cols === 1 ? 0 : i % 2;
+        const row = cols === 1 ? 0 : Math.floor(i / 2), col = cols === 1 ? 0 : i % 2;
         let cx = M + col * (cellW + gap);
-        if (n === 3 && i === 2) cx = (W - cellW) / 2; // bottom one centered
+        if (n === 3 && i === 2) cx = (W - cellW) / 2;
         const cy = gTop + row * (cellH + gap);
         placeImage(ctx, R, 'ex' + i, { x: cx, y: cy, w: cellW, h: cellH - labelH }, { label: 'Exercise ' + (i + 1) });
-        const lab = f.labels[i];
-        if (lab) {
-          const fit = fitRich(ctx, lab, { font: (s) => BODY(s, true), size: n === 1 ? 40 : 32, min: 20, lh: 1.15, maxW: cellW, maxLines: 1 });
-          drawLines(ctx, fit.lines.slice(0, 1), cx + cellW / 2, cy + cellH - labelH + 14, fit.size, { font: (s) => BODY(s, true), lh: 1.15, color: C.gray, boldColor: C.orange, align: 'center', ascent: 0.78 });
-        }
+        if (fits[i]) drawLines(ctx, fits[i].lines, cx + cellW / 2, cy + cellH - labelH + 16, fits[i].size, lo);
       }
     },
 
     cta(ctx, f, R) {
       let y = TOP - 6;
-      const maxW = W - 2 * M;
-      y = richBlock(ctx, f.headline || 'Headline', M, y, { font: HEAD, size: 112, min: 60, lh: 1.02, maxW, maxLines: 3, color: C.charcoal, ascent: 0.86 }).bottom + 30;
+      y = richBlock(ctx, hint(R, f.headline, 'Headline'), M, y, HEAD_O(112, 64, { maxLines: 3, name: 'Headline' })).bottom + 30;
       y = divider(ctx, M, y) + 32;
-      if (f.body) y = richBlock(ctx, f.body, M, y, { font: BODY, size: 38, min: 28, lh: 1.4, maxW, maxLines: 4, color: C.gray, ascent: 0.78 }).bottom + 26;
+      const budget = () => BOTTOM - IMG_MIN - 40 - y;
+      if (f.body) y = richBlock(ctx, f.body, M, y, BODY_O(38, 30, { lh: 1.4, maxLines: 4, maxH: budget() - (f.action ? 60 : 0), name: 'Body' })).bottom + 26;
       if (f.action) {
-        // quoted keyword -> bold orange (quotes kept)
         const act = f.action.includes('**') ? f.action : f.action.replace(/(["“][^"”]+["”])/, '**$1**');
-        y = richBlock(ctx, act, M, y, { font: (s, b) => `${b ? 700 : 600} ${s}px Inter, system-ui, sans-serif`, size: 40, min: 28, lh: 1.35, maxW, maxLines: 3, color: C.charcoal, ascent: 0.78 }).bottom;
+        y = richBlock(ctx, act, M, y, BODY_O(40, 30, { font: (s, b) => `${b ? 700 : 600} ${s}px Inter, system-ui, sans-serif`, lh: 1.35, maxLines: 3, maxH: Math.max(60, budget()), color: C.charcoal, name: 'Action line' })).bottom;
       }
       const top = Math.max(y + 40, H * 0.5);
-      placeImage(ctx, R, 'main', { x: M, y: top, w: W - 2 * M, h: H - M + 20 - top }, { label: 'Product / REP image' });
+      placeImage(ctx, R, 'main', { x: M, y: top, w: W - 2 * M, h: BOTTOM + 20 - top }, { label: 'Product / REP image' });
     },
 
     explainer(ctx, f, R) {
       let y = TOP - 4;
-      const maxW = W - 2 * M;
       if (f.label) {
-        ctx.font = SEMI(30);
-        ctx.fillStyle = C.gray;
-        drawSpaced(ctx, f.label.toUpperCase(), M, y + 26, 6, 'left');
+        spacedLabel(ctx, f.label, M, y + 26, W - 2 * M, 'left', 'Label');
         y += 34 + 30;
       }
-      y = richBlock(ctx, f.headline || 'Headline', M, y, { font: HEAD, size: 116, min: 60, lh: 1.02, maxW, maxLines: 4, color: C.charcoal, ascent: 0.86 }).bottom + 36;
-      if (f.body) {
-        y = richBlock(ctx, f.body, M, y, { font: BODY, size: 40, min: 28, lh: 1.42, maxW, maxH: 470, color: C.gray, ascent: 0.78 }).bottom;
-      }
+      const imgMin = 400; // keep REP clearly visible
+      y = richBlock(ctx, hint(R, f.headline, 'Headline'), M, y, HEAD_O(116, 60, { maxLines: 3, name: 'Headline' })).bottom + 34;
+      if (f.body) y = richBlock(ctx, f.body, M, y, BODY_O(40, 30, { lh: 1.42, maxH: H - imgMin - 36 - y, name: 'Body' })).bottom;
       const left = /left/i.test(f.corner || '');
       const top = Math.max(y + 36, H - 620);
       const bw = 520;
@@ -639,7 +733,9 @@ Use lighter weights and slow down the lowering phase.`;
     ctx.fillRect(0, 0, W, H);
     ctx.textAlign = 'left';
     ctx.textBaseline = 'alphabetic';
-    try { RENDER[slide.type](ctx, slide.f, R); } catch (e) { console.error(e); }
+    renderWarnings = R.warnings = [];
+    try { RENDER[slide.type](ctx, slide.f, R); } catch (e) { console.error(e); warn('This slide could not be drawn: ' + e.message); }
+    renderWarnings = null;
     noShadow(ctx);
     drawChrome(ctx, R);
   }
@@ -664,7 +760,13 @@ Use lighter weights and slow down the lowering phase.`;
   }
 
   function renderAll() {
-    slides.forEach((s, i) => { if (canvases[i]) renderSlide(canvases[i], s, ctxFor(i, false)); });
+    slides.forEach((s, i) => {
+      if (!canvases[i]) return;
+      const R = ctxFor(i, false);
+      renderSlide(canvases[i], s, R);
+      const box = canvases[i].closest('.slide-card').querySelector('.slide-warn');
+      if (box) box.innerHTML = R.warnings.map((w) => `<div>${esc(w)}</div>`).join('');
+    });
   }
 
   function rebuild() {
@@ -704,7 +806,10 @@ Use lighter weights and slow down the lowering phase.`;
       for (const def of SLOT_DEFS[s.type](s.f)) {
         slotBox.appendChild(slotRow(def, slotId(i, s.type, def.key)));
       }
-      card.append(meta, wrap, slotBox);
+      const warnBox = document.createElement('div');
+      warnBox.className = 'slide-warn';
+      warnBox.setAttribute('aria-live', 'polite');
+      card.append(meta, wrap, warnBox, slotBox);
       car.appendChild(card);
     });
     buildDots();
@@ -800,8 +905,18 @@ Use lighter weights and slow down the lowering phase.`;
   function updateDots() {
     const i = currentIndex();
     [...$('dots').children].forEach((b, k) => b.classList.toggle('on', k === i));
+    // size the carousel to the slide(s) in view, so short slides don't leave a gap
+    const car = $('carousel');
+    const cr = car.getBoundingClientRect();
+    let h = 0;
+    for (const c of car.children) {
+      const r = c.getBoundingClientRect();
+      if (r.right > cr.left + 8 && r.left < cr.right - 8) h = Math.max(h, c.offsetHeight);
+    }
+    if (h) car.style.height = h + 4 + 'px';
   }
   $('carousel').addEventListener('scroll', () => requestAnimationFrame(updateDots), { passive: true });
+  window.addEventListener('resize', () => requestAnimationFrame(updateDots));
   $('prev').onclick = () => goTo(currentIndex() - 1);
   $('next').onclick = () => goTo(currentIndex() + 1);
 
@@ -943,7 +1058,11 @@ Use lighter weights and slow down the lowering phase.`;
   $('btnZip').onclick = async () => {
     if (!slides.length) return toast('Add some slides first');
     const miss = missingCount();
-    if (miss && !(await ask(`${miss} image slot${miss > 1 ? 's are' : ' is'} still empty. Export anyway? Empty slots are left blank.`, 'Export anyway'))) return;
+    const probs = $('errors').children.length + document.querySelectorAll('.slide-warn > div').length;
+    const notes = [];
+    if (miss) notes.push(`${miss} image slot${miss > 1 ? 's are' : ' is'} still empty and will be left blank.`);
+    if (probs) notes.push(`${probs} text problem${probs > 1 ? 's are' : ' is'} listed in red in the editor or under the slides.`);
+    if (notes.length && !(await ask(`${notes.join(' ')} Export anyway?`, 'Export anyway'))) return;
     const btn = $('btnZip');
     btn.disabled = true;
     const old = btn.textContent;
