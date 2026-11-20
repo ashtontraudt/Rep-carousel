@@ -911,7 +911,16 @@ Use lighter weights and slow down the lowering phase.`;
     renderSlide(cv, slides[i], ctxFor(i, true));
     return new Promise((res) => cv.toBlob(res, 'image/png'));
   }
-  function saveBlob(blob, name) {
+  // Inside a claude.ai hosted page, downloads go through the host's save prompt.
+  let hostDownloads = null;
+  async function saveBlob(blob, name) {
+    if (!hostDownloads) hostDownloads = (window.claude && typeof window.claude.use === 'function')
+      ? window.claude.use('downloads').catch(() => null) : Promise.resolve(null);
+    const dl = await hostDownloads;
+    if (dl) {
+      try { await dl.save({ filename: name, data: blob }); return true; }
+      catch (e) { if (e && e.code === 'declined') return false; if (e && e.code !== 'unavailable' && e.code !== 'not_granted') { toast('Download failed: ' + (e.message || e.code)); return false; } }
+    }
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = name;
@@ -919,6 +928,7 @@ Use lighter weights and slow down the lowering phase.`;
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    return true;
   }
   function missingCount() {
     let n = 0;
@@ -947,8 +957,7 @@ Use lighter weights and slow down the lowering phase.`;
       }
       btn.textContent = 'Zipping…';
       const blob = await zip.generateAsync({ type: 'blob' });
-      saveBlob(blob, `${name}.zip`);
-      toast('ZIP downloaded');
+      if (await saveBlob(blob, `${name}.zip`)) toast('ZIP downloaded');
     } catch (e) {
       console.error(e);
       toast('Export failed: ' + e.message);
