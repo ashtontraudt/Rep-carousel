@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#F7EFE3">
+<title>REP Carousel Generator</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark">REP</span>
+    <span class="brand-sub">Carousel Generator</span>
+  </div>
+  <div class="top-actions">
+    <button class="btn ghost" id="btnLibrary" type="button">Library</button>
+    <button class="btn primary" id="btnZip" type="button">Download ZIP</button>
+  </div>
+</header>
+
+<main class="layout">
+  <section class="panel editor">
+    <div class="panel-head">
+      <h2>Slides text</h2>
+      <div class="row">
+        <button class="btn small ghost" id="btnExample" type="button">Load example</button>
+        <button class="btn small ghost" id="btnHelp" type="button">Syntax</button>
+      </div>
+    </div>
+    <textarea id="src" spellcheck="false" placeholder="[cover]
+title: 11 back exercises
+accent: ranked
+sub: worst to best
+---
+[tip]
+number: 1
+headline: Chest
+bullets:
+- Keep your **shoulder blades** pinned"></textarea>
+    <div id="errors" class="errors" aria-live="polite"></div>
+
+    <div class="settings">
+      <div class="setting">
+        <span class="setting-label">Wordmark logo icon (optional)</span>
+        <div class="slot-row" id="logoSlot"></div>
+      </div>
+    </div>
+
+    <details class="help" id="help">
+      <summary>Slide syntax</summary>
+      <p>Separate slides with a line containing only <code>---</code>. The first line of each block is the type in brackets. Use <code>**double asterisks**</code> for bold orange text.</p>
+      <ul>
+        <li><code>[cover]</code> title, accent, sub (title/accent can repeat for more lines)</li>
+        <li><code>[tip]</code> number, headline, bullets (lines starting with <code>- </code>)</li>
+        <li><code>[rank]</code> number, name, rating (0–5, halves ok), reason</li>
+        <li><code>[tier]</code> letter (S A B C D F), verdict</li>
+        <li><code>[reference]</code> headline, number, breakdown, labels (1–4 lines)</li>
+        <li><code>[cta]</code> headline, body, action (text in "quotes" becomes the orange keyword)</li>
+        <li><code>[explainer]</code> label, headline, body, corner (left/right, optional)</li>
+      </ul>
+    </details>
+  </section>
+
+  <section class="panel preview">
+    <div class="panel-head">
+      <h2>Preview <span id="slideCount" class="muted"></span></h2>
+      <div class="row nav">
+        <button class="btn small ghost icon" id="prev" type="button" aria-label="Previous slide">‹</button>
+        <button class="btn small ghost icon" id="next" type="button" aria-label="Next slide">›</button>
+      </div>
+    </div>
+    <div class="carousel" id="carousel"></div>
+    <div class="dots" id="dots"></div>
+    <p class="hint muted">Swipe the slides. Use the image slots under each slide to upload or pick from your library.</p>
+  </section>
+</main>
+
+<!-- Library modal -->
+<div class="modal" id="libModal" hidden>
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="libTitle">
+    <div class="modal-head">
+      <h2 id="libTitle">Image library</h2>
+      <button class="btn small ghost icon" id="libClose" type="button" aria-label="Close">✕</button>
+    </div>
+    <p class="muted small" id="libMode"></p>
+    <div class="lib-upload">
+      <label class="field">
+        <span>Save new uploads as</span>
+        <select id="libCategory"></select>
+      </label>
+      <label class="btn primary file-btn">
+        Upload images
+        <input type="file" id="libFile" accept="image/*" multiple hidden>
+      </label>
+    </div>
+    <div class="chips" id="libFilters"></div>
+    <div class="lib-grid" id="libGrid"></div>
+  </div>
+</div>
+
+<div class="modal ask" id="askModal" hidden>
+  <div class="modal-card ask-card" role="alertdialog" aria-modal="true" aria-labelledby="askMsg">
+    <p id="askMsg"></p>
+    <div class="row ask-row">
+      <button class="btn ghost" id="askCancel" type="button">Cancel</button>
+      <button class="btn primary" id="askOk" type="button">OK</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+
+<script src="vendor/jszip.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
