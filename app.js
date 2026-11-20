@@ -869,7 +869,7 @@ Use lighter weights and slow down the lowering phase.`;
       del.className = 'btn ghost danger'; del.type = 'button'; del.textContent = 'Delete';
       del.onclick = async (ev) => {
         ev.stopPropagation();
-        if (!confirm('Delete this image from the library?')) return;
+        if (!(await ask('Delete this image from the library?', 'Delete'))) return;
         if (dbOk) await DB.del(e.rec.id).catch(() => {});
         URL.revokeObjectURL(e.url);
         images.delete(e.rec.id);
@@ -943,7 +943,7 @@ Use lighter weights and slow down the lowering phase.`;
   $('btnZip').onclick = async () => {
     if (!slides.length) return toast('Add some slides first');
     const miss = missingCount();
-    if (miss && !confirm(`${miss} image slot${miss > 1 ? 's are' : ' is'} still empty. Export anyway? (Empty slots are left blank.)`)) return;
+    if (miss && !(await ask(`${miss} image slot${miss > 1 ? 's are' : ' is'} still empty. Export anyway? Empty slots are left blank.`, 'Export anyway'))) return;
     const btn = $('btnZip');
     btn.disabled = true;
     const old = btn.textContent;
@@ -969,6 +969,18 @@ Use lighter weights and slow down the lowering phase.`;
 
   // ---------- Misc ----------
   function esc(s) { return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+  function ask(msg, okLabel) {
+    return new Promise((res) => {
+      const m = $('askModal');
+      $('askMsg').textContent = msg;
+      $('askOk').textContent = okLabel || 'OK';
+      m.hidden = false;
+      $('askOk').focus();
+      const done = (v) => { m.hidden = true; $('askOk').onclick = $('askCancel').onclick = null; res(v); };
+      $('askOk').onclick = () => done(true);
+      $('askCancel').onclick = () => done(false);
+    });
+  }
   let toastT;
   function toast(msg) {
     const t = $('toast');
@@ -984,8 +996,8 @@ Use lighter weights and slow down the lowering phase.`;
     clearTimeout(debounce);
     debounce = setTimeout(rebuild, 250);
   });
-  $('btnExample').onclick = () => {
-    if (srcEl.value.trim() && srcEl.value !== EXAMPLE && !confirm('Replace the current text with the example?')) return;
+  $('btnExample').onclick = async () => {
+    if (srcEl.value.trim() && srcEl.value !== EXAMPLE && !(await ask('Replace your current text with the example slides?', 'Replace'))) return;
     srcEl.value = EXAMPLE;
     LS.set('rep.text', EXAMPLE);
     rebuild();

@@ -16,6 +16,7 @@
 
 * { box-sizing: border-box; }
 html, body { margin: 0; }
+:root { color-scheme: light; }
 body {
   background: var(--cream);
   color: var(--charcoal);
@@ -31,7 +32,7 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .
 .small { font-size: 13px; }
 
 .topbar {
-  position: sticky; top: 0; z-index: 20;
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20;
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding: 12px 16px; padding-top: max(12px, env(safe-area-inset-top));
   background: var(--cream); border-bottom: 1px solid var(--line);
@@ -188,3 +189,8 @@ select { min-height: 44px; border-radius: 10px; border: 1px solid var(--line); b
 @media (max-width: 959px) {
   textarea#src { height: 34vh; }
 }
+
+.modal.ask { z-index: 70; align-items: center; padding: 16px; }
+.ask-card { max-width: 400px; border-radius: 18px; gap: 14px; }
+.ask-card p { margin: 0; font-size: 16px; font-weight: 500; }
+.ask-row { justify-content: flex-end; }
