@@ -12,6 +12,10 @@ Single-page web app that turns structured text plus your uploaded images into br
   or a name you type). **New** starts a blank carousel and keeps the image library; **Saved**
   lets you open, duplicate or delete past carousels. Refreshing the page never loses work.
 - Download all slides as full-size PNGs in a ZIP named after the cover title, or single PNGs
+- Reel slides (Export → Download Reel slides): every slide as a 1080×1920 PNG in a ZIP
+  (`<cover-title>-reel-01.png`, …). The 4:5 design is scaled to 90.5% and centered vertically on cream,
+  so all content stays inside Instagram's Reel safe zone (clear of the top 220px, bottom 400px and
+  right 120px). Images that bleed off the edge in the 4:5 version stay inside the margins here.
 - Reel video export (Export → Reel video): MP4 (H.264, 30 fps) as a 9:16 reel (1080×1920, slides
   on charcoal) or a 4:5 feed video (1080×1350), 2–6 seconds per slide, swipe / fade / cut transitions.
   No audio: add music in Instagram. Made in the browser with WebCodecs, so it needs a recent Chrome

@@ -419,6 +419,13 @@ Use lighter weights and slow down the lowering phase.`;
 
   // Draw an image (or placeholder) contained in box. opts.valign: 'center' | 'bottom' | 'top'; opts.halign
   function placeImage(ctx, R, slotKey, box, opts = {}) {
+    if (R.reel) {
+      // Reel slides: images that normally bleed off the slide edge stay inside the margins,
+      // so nothing is cut off where the slide meets the extra cream space.
+      const x0 = Math.max(box.x, M), y0 = Math.max(box.y, M);
+      const x1 = Math.min(box.x + box.w, W - M), y1 = Math.min(box.y + box.h, H - M);
+      box = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+    }
     if (box.w < 40 || box.h < 40) return;
     const entry = R.slot(slotKey);
     if (entry && entry.img) {
@@ -751,6 +758,11 @@ Use lighter weights and slow down the lowering phase.`;
     noShadow(ctx);
     ctx.fillStyle = C.cream;
     ctx.fillRect(0, 0, W, H);
+    drawSlide(ctx, slide, R);
+  }
+  // Draws one slide in 1080x1350 slide coordinates on whatever transform ctx has.
+  function drawSlide(ctx, slide, R) {
+    noShadow(ctx);
     ctx.textAlign = 'left';
     ctx.textBaseline = 'alphabetic';
     renderWarnings = R.warnings = [];
@@ -770,10 +782,10 @@ Use lighter weights and slow down the lowering phase.`;
 
   const slotId = (i, type, key) => `${i}:${type}:${key}`;
   const entryFor = (id) => (id && images.has(id) ? images.get(id) : null);
-  function ctxFor(i, exporting) {
+  function ctxFor(i, exporting, reel) {
     const s = slides[i];
     return {
-      index: i, total: slides.length, exporting,
+      index: i, total: slides.length, exporting, reel: !!reel,
       slot: (key) => entryFor(slots[slotId(i, s.type, key)]),
       logo: () => entryFor(logoId),
     };
@@ -1051,6 +1063,27 @@ Use lighter weights and slow down the lowering phase.`;
     renderSlide(cv, slides[i], ctxFor(i, true));
     return new Promise((res) => cv.toBlob(res, 'image/png'));
   }
+
+  // 9:16 Reel slide: the 1080x1350 design, scaled and centered vertically on a 1080x1920 cream frame.
+  // Instagram's Reel overlays cover the top 220px, bottom 400px and right 120px. Slide content sits
+  // inside the slide's 80px margins (images included, see placeImage), so at REEL_SCALE:
+  //   content top    = 960 - 595 * 0.905 ≈ 421   (≥ 220)
+  //   content bottom = 960 + 615 * 0.905 ≈ 1517  (≤ 1520; tallest content ends 20px below the margin)
+  //   content right  = 51.3 + 1000 * 0.905 ≈ 956 (≤ 960)
+  const REEL = { W: 1080, H: 1920, SAFE: { top: 220, bottom: 1920 - 400, right: 1080 - 120 } };
+  const REEL_SCALE = 0.905;
+  function reelBlob(i) {
+    const cv = document.createElement('canvas');
+    cv.width = REEL.W; cv.height = REEL.H;
+    const ctx = cv.getContext('2d');
+    ctx.fillStyle = C.cream;
+    ctx.fillRect(0, 0, REEL.W, REEL.H);
+    const sw = W * REEL_SCALE, sh = H * REEL_SCALE;
+    ctx.setTransform(REEL_SCALE, 0, 0, REEL_SCALE, (REEL.W - sw) / 2, (REEL.H - sh) / 2);
+    drawSlide(ctx, slides[i], ctxFor(i, true, true));
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    return new Promise((res) => cv.toBlob(res, 'image/png'));
+  }
   // Inside a claude.ai hosted page, downloads go through the host's save prompt.
   let hostDownloads = null;
   async function saveBlob(blob, name) {
@@ -1090,22 +1123,23 @@ Use lighter weights and slow down the lowering phase.`;
     if (probs) notes.push(`${probs} text problem${probs > 1 ? 's are' : ' is'} listed in red in the editor or under the slides.`);
     return !notes.length || ask(`${notes.join(' ')} Export anyway?`, 'Export anyway');
   }
-  $('btnZip').onclick = async () => {
+  $('btnZip').onclick = () => exportZip($('btnZip'), false);
+  $('btnReelZip').onclick = () => exportZip($('btnReelZip'), true);
+  async function exportZip(btn, reel) {
     if (!(await preflight())) return;
-    const btn = $('btnZip');
     btn.disabled = true;
     const old = btn.textContent;
     try {
       await fontsReady;
       const zip = new JSZip();
-      const name = coverName();
+      const name = coverName() + (reel ? '-reel' : '');
       for (let i = 0; i < slides.length; i++) {
         btn.textContent = `Rendering ${i + 1}/${slides.length}`;
-        zip.file(`${name}-${String(i + 1).padStart(2, '0')}.png`, await exportBlob(i));
+        zip.file(`${name}-${String(i + 1).padStart(2, '0')}.png`, await (reel ? reelBlob(i) : exportBlob(i)));
       }
       btn.textContent = 'Zipping…';
       const blob = await zip.generateAsync({ type: 'blob' });
-      if (await saveBlob(blob, `${name}.zip`)) toast('ZIP downloaded');
+      if (await saveBlob(blob, `${name}.zip`)) toast(reel ? 'Reel slides downloaded' : 'ZIP downloaded');
     } catch (e) {
       console.error(e);
       toast('Export failed: ' + e.message);
