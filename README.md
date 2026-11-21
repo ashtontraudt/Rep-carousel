@@ -8,6 +8,9 @@ Single-page web app that turns structured text plus your uploaded images into br
 - Image slots per slide; uploads are saved in a browser image library (IndexedDB) with
   categories, including REP expressions (neutral, thinking, friendly, full-body)
 - Optional wordmark logo icon
+- Carousel management: every carousel auto-saves in the browser (named after its cover title,
+  or a name you type). **New** starts a blank carousel and keeps the image library; **Saved**
+  lets you open, duplicate or delete past carousels. Refreshing the page never loses work.
 - Download all slides as full-size PNGs in a ZIP named after the cover title, or single PNGs
 - "Load example" fills one sample of each slide type
 

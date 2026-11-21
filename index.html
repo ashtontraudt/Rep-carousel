@@ -21,6 +21,18 @@
 
 <main class="layout">
   <section class="panel editor">
+    <div class="car-bar">
+      <label class="car-name" for="carName">
+        <span class="setting-label">Carousel</span>
+        <input id="carName" type="text" maxlength="80" autocomplete="off" spellcheck="false" placeholder="Untitled carousel" aria-describedby="carStatus">
+      </label>
+      <div class="row car-actions">
+        <button class="btn small ghost" id="btnNew" type="button">New</button>
+        <button class="btn small ghost" id="btnSaved" type="button">Saved<span id="savedCount" class="count"></span></button>
+      </div>
+    </div>
+    <p id="carStatus" class="car-status" aria-live="polite"></p>
+
     <div class="panel-head">
       <h2>Slides text</h2>
       <div class="row">
@@ -96,6 +108,18 @@ bullets:
     </div>
     <div class="chips" id="libFilters"></div>
     <div class="lib-grid" id="libGrid"></div>
+  </div>
+</div>
+
+<!-- Saved carousels modal -->
+<div class="modal" id="savedModal" hidden>
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="savedTitle">
+    <div class="modal-head">
+      <h2 id="savedTitle">Saved carousels</h2>
+      <button class="btn small ghost icon" id="savedClose" type="button" aria-label="Close">✕</button>
+    </div>
+    <p class="muted small saved-note">Carousels are saved automatically in this browser. Images come from your image library.</p>
+    <div class="saved-list" id="savedList"></div>
   </div>
 </div>
 
