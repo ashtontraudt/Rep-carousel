@@ -12,6 +12,10 @@ Single-page web app that turns structured text plus your uploaded images into br
   or a name you type). **New** starts a blank carousel and keeps the image library; **Saved**
   lets you open, duplicate or delete past carousels. Refreshing the page never loses work.
 - Download all slides as full-size PNGs in a ZIP named after the cover title, or single PNGs
+- Reel video export (Export → Reel video): MP4 (H.264, 30 fps) as a 9:16 reel (1080×1920, slides
+  on charcoal) or a 4:5 feed video (1080×1350), 2–6 seconds per slide, swipe / fade / cut transitions.
+  No audio: add music in Instagram. Made in the browser with WebCodecs, so it needs a recent Chrome
+  or Edge, or Safari 17+.
 - "Load example" fills one sample of each slide type
 
 No build step: it is static (`index.html`, `app.js`, `style.css`, local fonts and JSZip in `fonts/` and `vendor/`).
@@ -76,4 +80,4 @@ body: Focusing on the muscle can increase **activation**.
 corner: right
 ```
 
-Fonts: Anton and Inter (SIL Open Font License, via Fontsource). Zip: JSZip (MIT).
+Fonts: Anton and Inter (SIL Open Font License, via Fontsource). Zip: JSZip (MIT). MP4 writing: mp4-muxer (MIT).

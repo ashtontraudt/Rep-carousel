@@ -1035,6 +1035,7 @@ Use lighter weights and slow down the lowering phase.`;
     if (e.key !== 'Escape' || !$('askModal').hidden) return;
     if (!$('libModal').hidden) closeLibrary();
     else if (!$('savedModal').hidden) closeSaved();
+    else if (!$('exportModal').hidden) closeExport();
   });
   $('btnLibrary').onclick = () => openLibrary(null, null);
 
@@ -1079,14 +1080,18 @@ Use lighter weights and slow down the lowering phase.`;
     const blob = await exportBlob(i);
     saveBlob(blob, `${coverName()}-${String(i + 1).padStart(2, '0')}.png`);
   }
-  $('btnZip').onclick = async () => {
-    if (!slides.length) return toast('Add some slides first');
+  // Shared check before any export: returns false if the user cancels.
+  async function preflight() {
+    if (!slides.length) { toast('Add some slides first'); return false; }
     const miss = missingCount();
     const probs = $('errors').children.length + document.querySelectorAll('.slide-warn > div').length;
     const notes = [];
     if (miss) notes.push(`${miss} image slot${miss > 1 ? 's are' : ' is'} still empty and will be left blank.`);
     if (probs) notes.push(`${probs} text problem${probs > 1 ? 's are' : ' is'} listed in red in the editor or under the slides.`);
-    if (notes.length && !(await ask(`${notes.join(' ')} Export anyway?`, 'Export anyway'))) return;
+    return !notes.length || ask(`${notes.join(' ')} Export anyway?`, 'Export anyway');
+  }
+  $('btnZip').onclick = async () => {
+    if (!(await preflight())) return;
     const btn = $('btnZip');
     btn.disabled = true;
     const old = btn.textContent;
@@ -1110,6 +1115,158 @@ Use lighter weights and slow down the lowering phase.`;
     }
   };
 
+
+
+  // ---------- Reel video export (WebCodecs H.264 + MP4) ----------
+  const VID_FPS = 30;
+  const TRANS_SEC = 0.5;
+  let vidBlob = null, vidUrl = null, vidBusy = false;
+
+  function vidOptions() {
+    return { format: $('vidFormat').value, sec: +$('vidSec').value, trans: $('vidTrans').value };
+  }
+  function updateVidInfo() {
+    const o = vidOptions();
+    const total = slides.length * o.sec;
+    $('vidLength').textContent = slides.length ? `${slides.length} slide${slides.length > 1 ? 's' : ''} × ${o.sec} s = ${total} s video` : '';
+  }
+  ['vidFormat', 'vidSec', 'vidTrans'].forEach((id) => $(id).addEventListener('change', () => { updateVidInfo(); clearVideo(); }));
+
+  function clearVideo() {
+    if (vidUrl) URL.revokeObjectURL(vidUrl);
+    vidUrl = null; vidBlob = null;
+    $('vidPreview').removeAttribute('src');
+    $('vidResult').hidden = true;
+  }
+  async function pickCodec(width, height) {
+    if (!('VideoEncoder' in window) || typeof Mp4Muxer === 'undefined') return null;
+    // H.264 High, Main, then Baseline (Instagram needs H.264 in MP4)
+    for (const codec of ['avc1.640028', 'avc1.4d0028', 'avc1.42003e', 'avc1.420034']) {
+      try {
+        const cfg = { codec, width, height, bitrate: 10_000_000, framerate: VID_FPS, avc: { format: 'avc' } };
+        const r = await VideoEncoder.isConfigSupported(cfg);
+        if (r.supported) return cfg;
+      } catch { /* try next */ }
+    }
+    return null;
+  }
+  const easeInOut = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+
+  async function makeVideo(o, onProgress) {
+    await fontsReady;
+    const reel = o.format === 'reel';
+    const VW = 1080, VH = reel ? 1920 : 1350;
+    const cfg = await pickCodec(VW, VH);
+    if (!cfg) throw new Error('UNSUPPORTED');
+    // render every slide once at full size (export mode: no placeholders)
+    const pics = slides.map((s, i) => { const c = document.createElement('canvas'); renderSlide(c, s, ctxFor(i, true)); return c; });
+    // where a slide sits in the frame: reel = card centered a little high, clear of Instagram's caption area
+    const sc = reel ? 0.92 : 1;
+    const cw = W * sc, ch = H * sc;
+    const cx = (VW - cw) / 2, cy = reel ? Math.round((VH - ch) / 2 - 60) : 0;
+    const back = reel ? C.charcoal : C.cream;  // reel: slide card on charcoal so its edges read clearly
+    const frame = document.createElement('canvas');
+    frame.width = VW; frame.height = VH;
+    const g = frame.getContext('2d');
+    const card = (pic, x, alpha = 1) => {
+      g.save();
+      g.globalAlpha = alpha;
+      if (reel) { rr(g, x, cy, cw, ch, 36); g.clip(); }
+      g.drawImage(pic, x, cy, cw, ch);
+      g.restore();
+    };
+
+    const muxer = new Mp4Muxer.Muxer({ target: new Mp4Muxer.ArrayBufferTarget(), video: { codec: 'avc', width: VW, height: VH, frameRate: VID_FPS }, fastStart: 'in-memory' });
+    let encErr = null;
+    const enc = new VideoEncoder({ output: (chunk, meta) => muxer.addVideoChunk(chunk, meta), error: (e) => { encErr = e; } });
+    enc.configure(cfg);
+
+    const n = pics.length, hold = o.sec;
+    const tr = o.trans === 'cut' ? 0 : TRANS_SEC;
+    const total = Math.round(n * hold * VID_FPS);
+    const step = VW; // distance between cards during a swipe
+    for (let f = 0; f < total; f++) {
+      if (encErr) throw encErr;
+      const t = f / VID_FPS;
+      const i = Math.min(n - 1, Math.floor(t / hold));
+      const local = t - i * hold;
+      g.fillStyle = back;
+      g.fillRect(0, 0, VW, VH);
+      if (tr && i < n - 1 && local > hold - tr) {
+        const p = easeInOut((local - (hold - tr)) / tr);
+        if (o.trans === 'swipe') { card(pics[i], cx - p * step); card(pics[i + 1], cx + (1 - p) * step); }
+        else if (p < 0.5) card(pics[i], cx, 1 - p * 2); // fade out to the background…
+        else card(pics[i + 1], cx, p * 2 - 1);             // …then fade the next slide in
+      } else {
+        card(pics[i], cx);
+      }
+      const vf = new VideoFrame(frame, { timestamp: Math.round((f * 1e6) / VID_FPS), duration: Math.round(1e6 / VID_FPS) });
+      enc.encode(vf, { keyFrame: f % (VID_FPS * 2) === 0 });
+      vf.close();
+      while (enc.encodeQueueSize > 6) await new Promise((r) => setTimeout(r, 4));
+      if (f % 10 === 0) { onProgress(f / total); await new Promise((r) => setTimeout(r, 0)); }
+    }
+    await enc.flush();
+    if (encErr) throw encErr;
+    enc.close();
+    muxer.finalize();
+    onProgress(1);
+    return new Blob([muxer.target.buffer], { type: 'video/mp4' });
+  }
+
+  function vidFileName(o) { return `${coverName()}-${o.format === 'reel' ? 'reel' : 'feed'}.mp4`; }
+
+  $('btnVideo').onclick = async () => {
+    if (vidBusy) return;
+    if (!(await preflight())) return;
+    const o = vidOptions();
+    const btn = $('btnVideo'), msg = $('vidMsg');
+    vidBusy = true;
+    btn.disabled = true;
+    clearVideo();
+    msg.className = 'small vid-msg';
+    msg.textContent = 'Making video…';
+    $('vidProgress').hidden = false;
+    $('vidBar').style.width = '0%';
+    const t0 = performance.now();
+    try {
+      vidBlob = await makeVideo(o, (p) => { $('vidBar').style.width = Math.round(p * 100) + '%'; msg.textContent = `Making video… ${Math.round(p * 100)}%`; });
+      vidUrl = URL.createObjectURL(vidBlob);
+      $('vidPreview').src = vidUrl;
+      $('vidResult').hidden = false;
+      const mb = (vidBlob.size / 1048576).toFixed(1);
+      msg.textContent = `Done: ${slides.length * o.sec} s, ${mb} MB, made in ${Math.round((performance.now() - t0) / 1000)} s. Check it below, then save it.`;
+    } catch (e) {
+      console.error(e);
+      msg.className = 'small vid-msg err';
+      msg.textContent = e.message === 'UNSUPPORTED'
+        ? "This browser can't make MP4 video. Use a recent Chrome or Edge on a computer, or Safari 17 or newer."
+        : 'Video export failed: ' + (e.message || e);
+    } finally {
+      vidBusy = false;
+      btn.disabled = false;
+      $('vidProgress').hidden = true;
+    }
+  };
+  $('btnVideoSave').onclick = async () => {
+    if (vidBlob && (await saveBlob(vidBlob, vidFileName(vidOptions())))) toast('Video saved');
+  };
+
+  // Export modal
+  function openExport() {
+    updateVidInfo();
+    $('exportModal').hidden = false;
+    document.body.style.overflow = 'hidden';
+  }
+  function closeExport() {
+    if (vidBusy) return;
+    $('exportModal').hidden = true;
+    document.body.style.overflow = '';
+    $('vidPreview').pause();
+  }
+  $('btnExport').onclick = openExport;
+  $('exportClose').onclick = closeExport;
+  $('exportModal').addEventListener('click', (e) => { if (e.target === $('exportModal')) closeExport(); });
 
   // ---------- Carousels: auto-save, New, Saved list ----------
   let work = null;          // the open carousel: { id, name, nameAuto, text, slots, created, updated, thumb }
@@ -1144,6 +1301,7 @@ Use lighter weights and slow down the lowering phase.`;
   }
   // Called after every change to the text, slot images or name.
   function markDirty() {
+    if (vidBlob) clearVideo(); // a made video no longer matches the slides
     work.text = srcEl.value;
     work.slots = { ...slots };
     work.updated = Date.now();
