@@ -15,7 +15,7 @@
   </div>
   <div class="top-actions">
     <button class="btn ghost" id="btnLibrary" type="button">Library</button>
-    <button class="btn primary" id="btnZip" type="button">Download ZIP</button>
+    <button class="btn primary" id="btnExport" type="button">Export</button>
   </div>
 </header>
 
@@ -111,6 +111,59 @@ bullets:
   </div>
 </div>
 
+<!-- Export modal -->
+<div class="modal" id="exportModal" hidden>
+  <div class="modal-card export-card" role="dialog" aria-modal="true" aria-labelledby="exportTitle">
+    <div class="modal-head">
+      <h2 id="exportTitle">Export</h2>
+      <button class="btn small ghost icon" id="exportClose" type="button" aria-label="Close">✕</button>
+    </div>
+    <div class="export-body">
+      <section class="export-sec">
+        <h3>Carousel post</h3>
+        <p class="muted small">Every slide as a 1080×1350 PNG, in order, in one ZIP.</p>
+        <button class="btn primary" id="btnZip" type="button">Download ZIP</button>
+      </section>
+      <section class="export-sec">
+        <h3>Reel video</h3>
+        <p class="muted small">An MP4 that plays the slides in order. It has no sound, so add music in Instagram.</p>
+        <div class="export-grid">
+          <label class="field"><span>Format</span>
+            <select id="vidFormat">
+              <option value="reel">Reel 9:16 (1080×1920)</option>
+              <option value="feed">Feed 4:5 (1080×1350)</option>
+            </select>
+          </label>
+          <label class="field"><span>Time per slide</span>
+            <select id="vidSec">
+              <option value="2">2 seconds</option>
+              <option value="3" selected>3 seconds</option>
+              <option value="4">4 seconds</option>
+              <option value="5">5 seconds</option>
+              <option value="6">6 seconds</option>
+            </select>
+          </label>
+          <label class="field"><span>Transition</span>
+            <select id="vidTrans">
+              <option value="swipe">Swipe</option>
+              <option value="fade">Fade</option>
+              <option value="cut">Cut</option>
+            </select>
+          </label>
+        </div>
+        <p class="muted small" id="vidLength"></p>
+        <button class="btn primary" id="btnVideo" type="button">Make video</button>
+        <div class="vid-progress" id="vidProgress" hidden><div id="vidBar"></div></div>
+        <p class="small vid-msg" id="vidMsg" aria-live="polite"></p>
+        <div class="vid-result" id="vidResult" hidden>
+          <video id="vidPreview" controls playsinline muted loop></video>
+          <button class="btn primary" id="btnVideoSave" type="button">Save video</button>
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+
 <!-- Saved carousels modal -->
 <div class="modal" id="savedModal" hidden>
   <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="savedTitle">
@@ -136,6 +189,7 @@ bullets:
 <div class="toast" id="toast" hidden></div>
 
 <script src="vendor/jszip.min.js"></script>
+<script src="vendor/mp4-muxer.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
