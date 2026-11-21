@@ -90,29 +90,49 @@ Use lighter weights and slow down the lowering phase.`;
       if (dbp) return dbp;
       dbp = new Promise((res, rej) => {
         if (!('indexedDB' in window)) return rej(new Error('IndexedDB unavailable'));
-        const r = indexedDB.open('rep-carousel', 1);
-        r.onupgradeneeded = () => { r.result.createObjectStore('images', { keyPath: 'id' }); };
+        const r = indexedDB.open('rep-carousel', 2);
+        r.onupgradeneeded = () => {
+          const db = r.result;
+          if (!db.objectStoreNames.contains('images')) db.createObjectStore('images', { keyPath: 'id' });
+          if (!db.objectStoreNames.contains('carousels')) db.createObjectStore('carousels', { keyPath: 'id' });
+        };
         r.onsuccess = () => res(r.result);
         r.onerror = () => rej(r.error);
+        r.onblocked = () => rej(new Error('Close other tabs of this app and reload'));
       });
       return dbp;
     }
-    async function tx(mode, fn) {
+    async function tx(store, mode, fn) {
       const db = await open();
       return new Promise((res, rej) => {
-        const t = db.transaction('images', mode);
-        const st = t.objectStore('images');
-        const out = fn(st);
+        const t = db.transaction(store, mode);
+        const out = fn(t.objectStore(store));
         t.oncomplete = () => res(out && 'result' in out ? out.result : undefined);
         t.onerror = () => rej(t.error);
       });
     }
     return {
-      all: () => tx('readonly', (s) => s.getAll()),
-      put: (rec) => tx('readwrite', (s) => s.put(rec)),
-      del: (id) => tx('readwrite', (s) => s.delete(id)),
+      all: () => tx('images', 'readonly', (s) => s.getAll()),
+      put: (rec) => tx('images', 'readwrite', (s) => s.put(rec)),
+      del: (id) => tx('images', 'readwrite', (s) => s.delete(id)),
+      cAll: () => tx('carousels', 'readonly', (s) => s.getAll()),
+      cPut: (rec) => tx('carousels', 'readwrite', (s) => s.put(rec)),
+      cDel: (id) => tx('carousels', 'readwrite', (s) => s.delete(id)),
     };
   })();
+
+  // Saved carousels: IndexedDB, falling back to localStorage when it's unavailable.
+  const CarStore = {
+    async all() {
+      try { return await DB.cAll(); } catch { return Object.values(LS.get('rep.carousels', {})); }
+    },
+    async put(rec) {
+      try { await DB.cPut(rec); } catch { const m = LS.get('rep.carousels', {}); m[rec.id] = rec; LS.set('rep.carousels', m); }
+    },
+    async del(id) {
+      try { await DB.cDel(id); } catch { const m = LS.get('rep.carousels', {}); delete m[id]; LS.set('rep.carousels', m); }
+    },
+  };
 
   // In-memory image cache: id -> { rec, url, img }
   const images = new Map();
@@ -744,7 +764,7 @@ Use lighter weights and slow down the lowering phase.`;
   const $ = (id) => document.getElementById(id);
   const srcEl = $('src');
   let slides = [];
-  let slots = LS.get('rep.slots', {});      // "idx:type:key" -> imageId
+  let slots = {};                           // "idx:type:key" -> imageId (for the open carousel)
   let logoId = LS.get('rep.logo', null);
   const canvases = [];
 
@@ -832,7 +852,7 @@ Use lighter weights and slow down the lowering phase.`;
     name.innerHTML = `${esc(def.label)}<small>${entry ? esc(entry.rec.name) : 'No image yet'}</small>`;
     const act = document.createElement('div');
     act.className = 'slot-actions';
-    const set = opts.set || ((v) => { if (v) slots[sid] = v; else delete slots[sid]; LS.set('rep.slots', slots); });
+    const set = opts.set || ((v) => { if (v) slots[sid] = v; else delete slots[sid]; markDirty(); });
     const after = () => refreshAfterImageChange();
 
     const up = document.createElement('label');
@@ -1011,7 +1031,11 @@ Use lighter weights and slow down the lowering phase.`;
   };
   $('libClose').onclick = closeLibrary;
   $('libModal').addEventListener('click', (e) => { if (e.target === $('libModal')) closeLibrary(); });
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('libModal').hidden) closeLibrary(); });
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || !$('askModal').hidden) return;
+    if (!$('libModal').hidden) closeLibrary();
+    else if (!$('savedModal').hidden) closeSaved();
+  });
   $('btnLibrary').onclick = () => openLibrary(null, null);
 
   // ---------- Export ----------
@@ -1086,6 +1110,177 @@ Use lighter weights and slow down the lowering phase.`;
     }
   };
 
+
+  // ---------- Carousels: auto-save, New, Saved list ----------
+  let work = null;          // the open carousel: { id, name, nameAuto, text, slots, created, updated, thumb }
+  let saveTimer = null;
+  let savingPromise = Promise.resolve();
+  const newCarId = () => 'car_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+  function blankWork() { const t = Date.now(); return { id: newCarId(), name: '', nameAuto: true, text: '', slots: {}, created: t, updated: t, thumb: null }; }
+  const isEmpty = (w) => !String(w.text || '').trim() && !Object.keys(w.slots || {}).length;
+  const shownName = (w) => w.name || 'Untitled carousel';
+
+  function autoName(text) {
+    const parsed = parse(text || '').slides;
+    const cover = parsed.find((x) => x.type === 'cover');
+    let n = cover ? [...cover.f.title, ...cover.f.accent].join(' ') : '';
+    if (!n) { const first = parsed.find((x) => x.f.headline || x.f.name); n = first ? first.f.headline || first.f.name : ''; }
+    n = n.replace(/\*\*/g, '').replace(/\s+/g, ' ').trim();
+    return n.length > 70 ? n.slice(0, 68).trim() + '…' : n;
+  }
+  function setStatus(msg, saving) {
+    const el = $('carStatus');
+    el.textContent = msg;
+    el.classList.toggle('saving', !!saving);
+  }
+  function showName() {
+    const inp = $('carName');
+    if (document.activeElement !== inp) inp.value = work.nameAuto ? '' : work.name;
+    inp.placeholder = work.nameAuto ? (work.name || 'Untitled carousel') : 'Untitled carousel';
+  }
+  function storeWorkingCopy() {
+    const { thumb, ...copy } = work; // keep localStorage small
+    LS.set('rep.work', copy);
+  }
+  // Called after every change to the text, slot images or name.
+  function markDirty() {
+    work.text = srcEl.value;
+    work.slots = { ...slots };
+    work.updated = Date.now();
+    if (work.nameAuto) work.name = autoName(work.text);
+    storeWorkingCopy();
+    showName();
+    setStatus('Saving…', true);
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => { flushSave(); }, 700);
+  }
+  function makeThumb() {
+    if (!slides.length) return null;
+    try {
+      const big = document.createElement('canvas');
+      renderSlide(big, slides[0], ctxFor(0, true));
+      const sm = document.createElement('canvas');
+      sm.width = 216; sm.height = 270;
+      const c = sm.getContext('2d');
+      c.imageSmoothingQuality = 'high';
+      c.drawImage(big, 0, 0, 216, 270);
+      return sm.toDataURL('image/jpeg', 0.82);
+    } catch { return null; }
+  }
+  // Write the open carousel to the Saved list now (skips carousels that are still empty).
+  function flushSave() {
+    clearTimeout(saveTimer);
+    savingPromise = savingPromise.then(async () => {
+      if (!work) return;
+      if (isEmpty(work)) { setStatus('Add some slide text and it will save automatically.'); return; }
+      work.thumb = makeThumb();
+      await CarStore.put({ ...work, slots: { ...work.slots } });
+      setStatus('Saved in this browser');
+      refreshSavedCount();
+    }).catch((e) => { console.error(e); setStatus('Could not save: ' + (e.message || e)); });
+    return savingPromise;
+  }
+  async function refreshSavedCount() {
+    const list = await CarStore.all();
+    $('savedCount').textContent = list.length ? String(list.length) : '';
+  }
+  function loadIntoEditor(rec) {
+    work = { ...rec, slots: { ...(rec.slots || {}) } };
+    slots = { ...work.slots };
+    srcEl.value = work.text || '';
+    storeWorkingCopy();
+    showName();
+    setStatus(isEmpty(work) ? 'Add some slide text and it will save automatically.' : 'Saved in this browser');
+    rebuild();
+    goTo(0);
+  }
+
+  $('carName').addEventListener('input', () => {
+    const v = $('carName').value.trim();
+    work.nameAuto = !v;
+    work.name = v || autoName(srcEl.value);
+    markDirty();
+  });
+  $('carName').addEventListener('blur', showName);
+
+  $('btnNew').onclick = async () => {
+    await flushSave();
+    const had = !isEmpty(work);
+    loadIntoEditor(blankWork());
+    srcEl.focus({ preventScroll: true });
+    toast(had ? 'New carousel started. The previous one is in Saved.' : 'New carousel started');
+  };
+
+  // Saved list
+  function closeSaved() { $('savedModal').hidden = true; document.body.style.overflow = ''; }
+  async function openSaved() {
+    await flushSave();
+    $('savedModal').hidden = false;
+    document.body.style.overflow = 'hidden';
+    renderSaved();
+  }
+  function fmtDate(t) {
+    const d = new Date(t), now = new Date();
+    const sameDay = d.toDateString() === now.toDateString();
+    return sameDay ? 'today, ' + d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+      : d.toLocaleDateString([], { month: 'short', day: 'numeric', year: d.getFullYear() === now.getFullYear() ? undefined : 'numeric' });
+  }
+  async function renderSaved() {
+    const list = (await CarStore.all()).sort((a, b) => b.updated - a.updated);
+    const box = $('savedList');
+    box.innerHTML = '';
+    if (!list.length) {
+      box.innerHTML = '<div class="lib-empty">No saved carousels yet. Start typing slide text and it saves here automatically.</div>';
+      return;
+    }
+    for (const rec of list) {
+      const cur = rec.id === work.id;
+      const n = parse(rec.text || '').slides.length;
+      const item = document.createElement('div');
+      item.className = 'saved-item' + (cur ? ' current' : '');
+      const th = document.createElement('div');
+      th.className = 'saved-thumb';
+      if (rec.thumb) { const im = document.createElement('img'); im.src = rec.thumb; im.alt = ''; th.appendChild(im); }
+      const info = document.createElement('div');
+      info.className = 'saved-info';
+      const nm = document.createElement('div');
+      nm.className = 'saved-name';
+      nm.textContent = shownName(rec);
+      nm.title = shownName(rec);
+      const meta = document.createElement('div');
+      meta.className = 'saved-meta';
+      if (cur) { const tg = document.createElement('span'); tg.className = 'saved-tag'; tg.textContent = 'Open now'; meta.appendChild(tg); }
+      meta.appendChild(document.createTextNode(`${n} slide${n === 1 ? '' : 's'} · edited ${fmtDate(rec.updated)}`));
+      info.append(nm, meta);
+      const act = document.createElement('div');
+      act.className = 'saved-actions';
+      const mk = (label, cls, fn) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'btn ghost ' + cls; b.textContent = label; b.onclick = fn; act.appendChild(b); return b; };
+      if (!cur) mk('Open', 'primary', () => { closeSaved(); loadIntoEditor(rec); toast(`Opened "${shownName(rec)}"`); });
+      mk('Duplicate', '', async () => {
+        const t = Date.now();
+        const copy = { ...rec, id: newCarId(), name: shownName(rec) + ' (copy)', nameAuto: false, created: t, updated: t, slots: { ...(rec.slots || {}) } };
+        await CarStore.put(copy);
+        toast(`Duplicated as "${copy.name}"`);
+        renderSaved(); refreshSavedCount();
+      });
+      mk('Delete', 'danger', async () => {
+        if (!(await ask(`Delete "${shownName(rec)}"? Its text and image choices will be removed. Images stay in your library.`, 'Delete'))) return;
+        await CarStore.del(rec.id);
+        if (cur) loadIntoEditor(blankWork());
+        toast('Carousel deleted');
+        renderSaved(); refreshSavedCount();
+      });
+      item.append(th, info, act);
+      box.appendChild(item);
+    }
+  }
+  $('btnSaved').onclick = openSaved;
+  $('savedClose').onclick = closeSaved;
+  $('savedModal').addEventListener('click', (e) => { if (e.target === $('savedModal')) closeSaved(); });
+  // Save straight away when the page is hidden or closed.
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && work) flushSave(); });
+  window.addEventListener('pagehide', () => { if (work) flushSave(); });
+
   // ---------- Misc ----------
   function esc(s) { return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
   function ask(msg, okLabel) {
@@ -1111,14 +1306,14 @@ Use lighter weights and slow down the lowering phase.`;
 
   let debounce;
   srcEl.addEventListener('input', () => {
-    LS.set('rep.text', srcEl.value);
+    markDirty();
     clearTimeout(debounce);
     debounce = setTimeout(rebuild, 250);
   });
   $('btnExample').onclick = async () => {
     if (srcEl.value.trim() && srcEl.value !== EXAMPLE && !(await ask('Replace your current text with the example slides?', 'Replace'))) return;
     srcEl.value = EXAMPLE;
-    LS.set('rep.text', EXAMPLE);
+    markDirty();
     rebuild();
     goTo(0);
   };
@@ -1129,9 +1324,24 @@ Use lighter weights and slow down the lowering phase.`;
   ]).catch(() => {});
 
   (async () => {
-    srcEl.value = LS.get('rep.text', '');
+    // Restore the carousel that was open last (working copy is in localStorage, so a refresh never loses work).
+    work = LS.get('rep.work', null);
+    if (!work || !work.id) {
+      // first run, or upgrading from the single-draft version
+      work = blankWork();
+      work.text = LS.get('rep.text', '') || '';
+      work.slots = LS.get('rep.slots', {}) || {};
+      try { localStorage.removeItem('rep.text'); localStorage.removeItem('rep.slots'); } catch { /* ignore */ }
+    }
+    if (work.nameAuto) work.name = autoName(work.text);
+    storeWorkingCopy();
+    slots = { ...(work.slots || {}) };
+    srcEl.value = work.text || '';
     await Promise.all([fontsReady, loadLibrary()]);
     rebuild();
     renderLogoSlot();
+    showName();
+    await flushSave();
+    refreshSavedCount();
   })();
 })();
