@@ -26,6 +26,10 @@
     cta: () => [{ key: 'main', label: 'Product / REP image', cat: 'Product' }],
     explainer: () => [{ key: 'main', label: 'REP expression', cat: 'REP · neutral' }],
     tier: () => [],
+    tiergroup: (f) => {
+      const n = Math.max(1, Math.min(4, f.items.length || 1));
+      return Array.from({ length: n }, (_, i) => ({ key: 'ex' + i, label: (f.items[i] && f.items[i].name) || `Exercise ${i + 1}`, cat: 'Exercise' }));
+    },
     reference: (f) => {
       const n = Math.max(1, Math.min(4, f.labels.length || 1));
       const out = [{ key: 'target', label: 'Target muscle', cat: 'Muscle' }];
@@ -57,6 +61,12 @@ reason: Awkward setup and hard to load heavy enough to keep progressing.
 [tier]
 letter: S
 verdict: The best of the best
+---
+[tiergroup]
+letter: B
+items:
+- Seated Cable Row: Easy to load, but most people cut the stretch short
+- Lat Pulldown: Great for beginners, less carryover than pull-ups
 ---
 [reference]
 headline: Shoulders
@@ -185,12 +195,13 @@ Use lighter weights and slow down the lowering phase.`;
     reference: ['headline', 'number', 'breakdown', 'labels'],
     cta: ['headline', 'body', 'action'],
     explainer: ['label', 'headline', 'body', 'corner'],
+    tiergroup: ['letter', 'items'],
   };
-  const LIST_KEYS = new Set(['bullets', 'labels']);
+  const LIST_KEYS = new Set(['bullets', 'labels', 'items']);
 
   const REQUIRED = {
     cover: [['title', 'accent']], tip: ['headline'], rank: ['name', 'rating'], tier: ['letter', 'verdict'],
-    reference: ['headline', 'labels'], cta: ['headline'], explainer: ['headline'],
+    reference: ['headline', 'labels'], cta: ['headline'], explainer: ['headline'], tiergroup: ['letter', 'items'],
   };
   function editDistance(a, b) {
     const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
@@ -251,7 +262,15 @@ Use lighter weights and slow down the lowering phase.`;
         if (f.rating && (isNaN(r) || r < 0 || r > 5)) errors.push(`${tag}: rating "${f.rating}" should be a number from 0 to 5 (halves allowed).`);
         f.rating = isNaN(r) ? 0 : Math.max(0, Math.min(5, Math.round(r * 2) / 2));
       }
-      if (type === 'tier') {
+      if (type === 'tiergroup') {
+        // "- Name: one-line reason" (split at the first colon; the reason is optional)
+        f.items = f.items.map((line) => {
+          const k = line.indexOf(':');
+          return k > 0 ? { name: line.slice(0, k).trim(), reason: line.slice(k + 1).trim() } : { name: line.trim(), reason: '' };
+        }).filter((it) => it.name);
+        if (f.items.length > 4) { errors.push(`${tag}: up to 4 items are supported. Extra ones were ignored.`); f.items = f.items.slice(0, 4); }
+      }
+      if (type === 'tier' || type === 'tiergroup') {
         const L = (f.letter || '').trim().toUpperCase();
         if (L && !TIER_COLORS[L.charAt(0)]) errors.push(`${tag}: tier letter "${f.letter}" should be one of S, A, B, C, D, F.`);
         f.letter = L.charAt(0);
@@ -265,10 +284,15 @@ Use lighter weights and slow down the lowering phase.`;
   // ---------- Text helpers ----------
   function parseRich(str) {
     const runs = [];
-    String(str || '').split(/(\*\*[^*]+?\*\*)/g).forEach((p) => {
-      if (!p) return;
-      if (/^\*\*[^*]+\*\*$/.test(p)) runs.push({ t: p.slice(2, -2), b: true });
-      else runs.push({ t: p.replace(/\*\*/g, ''), b: false });
+    // \u0001…\u0001 marks a run that is bold charcoal (used for [tiergroup] item names); **…** is bold orange.
+    String(str || '').split(/(\u0001[^\u0001]*\u0001)/g).forEach((chunk) => {
+      if (!chunk) return;
+      if (chunk.charAt(0) === '\u0001') { const t = chunk.slice(1, -1); if (t) runs.push({ t, b: true, c: C.charcoal }); return; }
+      chunk.split(/(\*\*[^*]+?\*\*)/g).forEach((p) => {
+        if (!p) return;
+        if (/^\*\*[^*]+\*\*$/.test(p)) runs.push({ t: p.slice(2, -2), b: true });
+        else runs.push({ t: p.replace(/\*\*/g, ''), b: false });
+      });
     });
     return runs;
   }
@@ -280,8 +304,8 @@ Use lighter weights and slow down the lowering phase.`;
       for (const piece of r.t.split(/(\s+)/)) {
         if (!piece) continue;
         if (/^\s+$/.test(piece)) { pendingSpace = true; cur = null; continue; }
-        if (cur && !pendingSpace) cur.segs.push({ t: piece, b: r.b });
-        else { cur = { segs: [{ t: piece, b: r.b }], space: words.length > 0 && pendingSpace }; words.push(cur); }
+        if (cur && !pendingSpace) cur.segs.push({ t: piece, b: r.b, c: r.c });
+        else { cur = { segs: [{ t: piece, b: r.b, c: r.c }], space: words.length > 0 && pendingSpace }; words.push(cur); }
         pendingSpace = false;
       }
     }
@@ -367,7 +391,7 @@ Use lighter weights and slow down the lowering phase.`;
         if (wi > 0) cx += spaceW;
         for (const s of w.segs) {
           ctx.font = o.font(size, s.b);
-          ctx.fillStyle = s.b ? (o.boldColor || C.orange) : o.color;
+          ctx.fillStyle = s.c || (s.b ? (o.boldColor || C.orange) : o.color);
           ctx.fillText(s.t, cx, base);
           cx += ctx.measureText(s.t).width;
         }
@@ -513,6 +537,29 @@ Use lighter weights and slow down the lowering phase.`;
     }
     ctx.fillStyle = C.gray;
     drawSpaced(ctx, t, x, y, sp(size), align);
+  }
+
+  // Exercise image grid with bold gray labels underneath: 1 = large, 2 = side by side, 3 = 2 + 1 centered, 4 = 2x2.
+  // Slots are 'ex0'..'ex3'. Fills from gTop down to the bottom margin.
+  function imageGrid(ctx, R, labels, gTop) {
+      const n = Math.max(1, Math.min(4, labels.length || 1));
+      const gap = 30;
+      const rows = n <= 2 ? 1 : 2, cols = n === 1 ? 1 : 2;
+      const cellW = (W - 2 * M - (cols - 1) * gap) / cols;
+      const lo = { font: (s) => BODY(s, true), size: n === 1 ? 40 : 30, min: 24, lh: 1.15, ascent: 0.78, maxW: cellW - 10, maxLines: 2, color: C.gray, boldColor: C.orange, align: 'center' };
+      const fits = labels.slice(0, n).map((lab, i) => fitRich(ctx, lab, { ...lo, name: `Label ${i + 1}` }));
+      const labelLines = Math.max(1, ...fits.map((x) => x.lines.length));
+      const labelSize = Math.max(lo.min, ...fits.map((x) => x.size));
+      const labelH = 16 + labelLines * labelSize * lo.lh;
+      const cellH = (BOTTOM - gTop - (rows - 1) * gap) / rows;
+      for (let i = 0; i < n; i++) {
+        const row = cols === 1 ? 0 : Math.floor(i / 2), col = cols === 1 ? 0 : i % 2;
+        let cx = M + col * (cellW + gap);
+        if (n === 3 && i === 2) cx = (W - cellW) / 2;
+        const cy = gTop + row * (cellH + gap);
+        placeImage(ctx, R, 'ex' + i, { x: cx, y: cy, w: cellW, h: cellH - labelH }, { label: 'Exercise ' + (i + 1) });
+        if (fits[i]) drawLines(ctx, fits[i].lines, cx + cellW / 2, cy + cellH - labelH + 16, fits[i].size, lo);
+      }
   }
 
   const RENDER = {
@@ -678,26 +725,60 @@ Use lighter weights and slow down the lowering phase.`;
       const tH = Math.max(260, y - tTop);
       placeImage(ctx, R, 'target', { x: tX, y: tTop, w: tW, h: tH }, { label: 'Target muscle' });
 
-      // exercise grid (1 = large, 2 = side by side, 3 = 2 + 1 centered, 4 = 2x2)
-      const n = Math.max(1, Math.min(4, f.labels.length || 1));
-      const gTop = Math.max(y, tTop + tH) + 44;
-      const gap = 30;
-      const rows = n <= 2 ? 1 : 2, cols = n === 1 ? 1 : 2;
-      const cellW = (W - 2 * M - (cols - 1) * gap) / cols;
-      const lo = { font: (s) => BODY(s, true), size: n === 1 ? 40 : 30, min: 24, lh: 1.15, ascent: 0.78, maxW: cellW - 10, maxLines: 2, color: C.gray, boldColor: C.orange, align: 'center' };
-      const fits = f.labels.slice(0, n).map((lab, i) => fitRich(ctx, lab, { ...lo, name: `Label ${i + 1}` }));
-      const labelLines = Math.max(1, ...fits.map((x) => x.lines.length));
-      const labelSize = Math.max(lo.min, ...fits.map((x) => x.size));
-      const labelH = 16 + labelLines * labelSize * lo.lh;
-      const cellH = (BOTTOM - gTop - (rows - 1) * gap) / rows;
-      for (let i = 0; i < n; i++) {
-        const row = cols === 1 ? 0 : Math.floor(i / 2), col = cols === 1 ? 0 : i % 2;
-        let cx = M + col * (cellW + gap);
-        if (n === 3 && i === 2) cx = (W - cellW) / 2;
-        const cy = gTop + row * (cellH + gap);
-        placeImage(ctx, R, 'ex' + i, { x: cx, y: cy, w: cellW, h: cellH - labelH }, { label: 'Exercise ' + (i + 1) });
-        if (fits[i]) drawLines(ctx, fits[i].lines, cx + cellW / 2, cy + cellH - labelH + 16, fits[i].size, lo);
+      imageGrid(ctx, R, f.labels, Math.max(y, tTop + tH) + 44);
+    },
+
+    tiergroup(ctx, f, R) {
+      const L = f.letter || (R.exporting ? '' : '?');
+      // badge + "TIER"
+      const bs = 120, by = TOP - 4;
+      ctx.save();
+      badgeShadow(ctx);
+      ctx.fillStyle = TIER_COLORS[L] || C.charcoal;
+      rr(ctx, M, by, bs, bs, 28);
+      ctx.fill();
+      ctx.restore();
+      ctx.fillStyle = C.cream;
+      ctx.font = HEAD(92);
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(L, M + bs / 2, by + bs / 2 + 4);
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'alphabetic';
+      ctx.font = HEAD(124);
+      const cap = ctx.measureText('TIER').actualBoundingBoxAscent;
+      ctx.fillStyle = C.charcoal;
+      ctx.fillText('TIER', M + bs + 28, by + bs / 2 + cap / 2);
+      let y = by + bs + 48;
+
+      // items: "Name:" bold charcoal, reason regular gray, 24px between items
+      const items = f.items.slice(0, 4);
+      const n = Math.max(1, items.length);
+      const io = BODY_O(40, 30, { color: C.gray, boldColor: C.orange });
+      const gap = 24;
+      const texts = items.map((it) => `\u0001${it.name.replace(/\*\*/g, '')}${it.reason ? ':' : ''}\u0001${it.reason ? ' ' + it.reason : ''}`);
+      const gridMin = n <= 2 ? 440 : 600; // keep the images a useful size
+      const room = BOTTOM - gridMin - 44 - y;
+      const heightAt = (sz) => texts.reduce((a, t) => a + wrapRich(ctx, t, BODY, sz, io.maxW).length * sz * io.lh + gap, -gap);
+      let size = 40;
+      while (size > 30 && heightAt(size) > room) size -= 2;
+      let left = room;
+      for (let i = 0; i < texts.length; i++) {
+        const lineH = size * io.lh;
+        const maxLines = Math.floor(left / lineH);
+        if (maxLines < 1) { warn(`${texts.length - i} item(s) didn't fit and were left out. Shorten the reasons.`); break; }
+        const fit = fitRich(ctx, texts[i], { ...io, size, min: size, maxLines, name: `Item ${i + 1}` });
+        const ny = drawLines(ctx, fit.lines, M, y, size, io);
+        left -= ny - y + gap;
+        y = ny + gap;
       }
+      if (!items.length && !R.exporting) {
+        ctx.font = BODY(36, false);
+        ctx.fillStyle = C.placeholder;
+        ctx.fillText('Add items like "- Lat Pulldown: one-line reason"', M, y + 30);
+        y += 60;
+      }
+      imageGrid(ctx, R, items.map((it) => it.name), Math.max(y - gap + 44, H / 2));
     },
 
     cta(ctx, f, R) {
