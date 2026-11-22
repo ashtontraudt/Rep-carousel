@@ -4,7 +4,7 @@ Single-page web app that turns structured text plus your uploaded images into br
 1080×1350 Instagram carousel slides for **@repexplains**.
 
 - Live, swipeable preview of every slide (auto slide counter)
-- Seven slide types: `[cover]`, `[tip]`, `[rank]`, `[tier]`, `[reference]`, `[cta]`, `[explainer]`
+- Eight slide types: `[cover]`, `[tip]`, `[rank]`, `[tier]`, `[tiergroup]`, `[reference]`, `[cta]`, `[explainer]`
 - Image slots per slide; uploads are saved in a browser image library (IndexedDB) with
   categories, including REP expressions (neutral, thinking, friendly, full-body)
 - Optional wordmark logo icon
@@ -62,6 +62,12 @@ reason: Awkward setup and hard to load heavy.
 [tier]
 letter: S
 verdict: The best of the best
+---
+[tiergroup]
+letter: B
+items:
+- Seated Cable Row: Easy to load, but most people cut the stretch short
+- Lat Pulldown: Great for beginners, less carryover than pull-ups
 ---
 [reference]
 headline: Shoulders
