@@ -188,7 +188,7 @@ Use lighter weights and slow down the lowering phase.`;
 
   // ---------- Parser ----------
   const KEYS = {
-    cover: ['title', 'accent', 'sub'],
+    cover: ['title', 'accent', 'sub', 'fit'],
     tip: ['number', 'headline', 'bullets'],
     rank: ['number', 'name', 'rating', 'reason'],
     tier: ['letter', 'verdict'],
@@ -257,6 +257,12 @@ Use lighter weights and slow down the lowering phase.`;
       }
       const missing = REQUIRED[type].filter((r) => (Array.isArray(r) ? r : [r]).every((k) => !f[k] || !f[k].length)).map((r) => (Array.isArray(r) ? r.join(' or ') : r));
       if (missing.length) errors.push(`${tag}: missing ${missing.join(', ')}.`);
+      if (type === 'cover') {
+        // fit: contain (default) shows the whole image; bleed fills the bottom and runs off the edge
+        const fit = (f.fit || '').trim().toLowerCase();
+        if (fit && fit !== 'contain' && fit !== 'bleed') errors.push(`${tag}: fit "${f.fit}" should be contain or bleed. Using contain.`);
+        f.fit = fit === 'bleed' ? 'bleed' : 'contain';
+      }
       if (type === 'rank') {
         const r = parseFloat(String(f.rating).replace(',', '.'));
         if (f.rating && (isNaN(r) || r < 0 || r > 5)) errors.push(`${tag}: rating "${f.rating}" should be a number from 0 to 5 (halves allowed).`);
@@ -599,8 +605,16 @@ Use lighter weights and slow down the lowering phase.`;
         const sub = f.sub.trim().replace(/^\(|\)$/g, '');
         y = richBlock(ctx, `(${sub})`, W / 2, y, BODY_O(38, 28, { lh: 1.3, maxLines: 2, align: 'center', name: 'Sub line' })).bottom;
       }
-      const top = Math.max(y + 40, H * 0.48);
-      placeImage(ctx, R, 'main', { x: 40, y: top, w: W - 80, h: H - top + 70 }, { valign: 'bottom', label: 'Cover image' });
+      if (f.fit === 'bleed') {
+        // fills the bottom half and runs 70px off the bottom edge (cropped)
+        const top = Math.max(y + 40, H * 0.48);
+        placeImage(ctx, R, 'main', { x: 40, y: top, w: W - 80, h: H - top + 70 }, { valign: 'bottom', label: 'Cover image' });
+      } else {
+        // contain: the whole image, scaled to fit between the subtitle and the bottom margin,
+        // centered horizontally and sitting on the bottom margin. Nothing is cropped.
+        const top = y + 40;
+        placeImage(ctx, R, 'main', { x: M, y: top, w: W - 2 * M, h: BOTTOM - top }, { valign: 'bottom', label: 'Cover image' });
+      }
     },
 
     tip(ctx, f, R) {

@@ -41,11 +41,16 @@ and `/ (root)` → Save. The site appears at `https://<user>.github.io/Rep-carou
 Separate slides with a line containing only `---`. First line of a block is the type in brackets;
 fields are `key: value` lines. `**double asterisks**` = bold orange text.
 
+`[cover]` takes an optional `fit`: `contain` (default) shows the whole image, scaled to fit between
+the subtitle and the 80px bottom margin, centered and sitting on that margin. `bleed` fills the bottom
+and runs off the bottom edge (cropped). The 9:16 Reel slides never crop the cover image.
+
 ```
 [cover]
 title: 11 back exercises
 accent: ranked worst to best
 sub: based on science, not vibes
+fit: contain
 ---
 [tip]
 number: 1
