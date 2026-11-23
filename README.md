@@ -45,6 +45,9 @@ fields are `key: value` lines. `**double asterisks**` = bold orange text.
 the subtitle and the 80px bottom margin, centered and sitting on that margin. `bleed` fills the bottom
 and runs off the bottom edge (cropped). The 9:16 Reel slides never crop the cover image.
 
+On `[reference]` slides, exercise images are scaled as large as fits their grid cells (never cropped),
+each label sits 12px under its image, and the grid starts close to the breakdown text.
+
 `[explainer]` takes an optional `corner`: `right` (default) or `left` puts a small REP image in that
 bottom corner; `center` scales it as large as fits between the body text and the 80px bottom margin,
 centered horizontally and never cropped or covering text.
