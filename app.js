@@ -263,6 +263,13 @@ Use lighter weights and slow down the lowering phase.`;
         if (fit && fit !== 'contain' && fit !== 'bleed') errors.push(`${tag}: fit "${f.fit}" should be contain or bleed. Using contain.`);
         f.fit = fit === 'bleed' ? 'bleed' : 'contain';
       }
+      if (type === 'explainer') {
+        // corner: right (default) / left = small corner image; center = large centered image
+        const c = (f.corner || '').trim().toLowerCase();
+        const mode = /cent(er|re)/.test(c) ? 'center' : /left/.test(c) ? 'left' : /right/.test(c) || !c ? 'right' : null;
+        if (!mode) errors.push(`${tag}: corner "${f.corner}" should be left, right or center. Using right.`);
+        f.corner = mode || 'right';
+      }
       if (type === 'rank') {
         const r = parseFloat(String(f.rating).replace(',', '.'));
         if (f.rating && (isNaN(r) || r < 0 || r > 5)) errors.push(`${tag}: rating "${f.rating}" should be a number from 0 to 5 (halves allowed).`);
@@ -818,7 +825,13 @@ Use lighter weights and slow down the lowering phase.`;
       const imgMin = 400; // keep REP clearly visible
       y = richBlock(ctx, hint(R, f.headline, 'Headline'), M, y, HEAD_O(116, 60, { maxLines: 3, name: 'Headline' })).bottom + 34;
       if (f.body) y = richBlock(ctx, f.body, M, y, BODY_O(40, 30, { lh: 1.42, maxH: H - imgMin - 36 - y, name: 'Body' })).bottom;
-      const left = /left/i.test(f.corner || '');
+      if (f.corner === 'center') {
+        // as large as fits between the last text and the bottom margin, centered, never cropped
+        const top = (f.body ? y : y - 34) + 36; // without a body, start right under the headline
+        placeImage(ctx, R, 'main', { x: M, y: top, w: W - 2 * M, h: BOTTOM - top }, { valign: 'bottom', label: 'REP expression' });
+        return;
+      }
+      const left = f.corner === 'left';
       const top = Math.max(y + 36, H - 620);
       const bw = 520;
       placeImage(ctx, R, 'main', { x: left ? M - 20 : W - M + 20 - bw, y: top, w: bw, h: H - top }, { valign: 'bottom', halign: left ? 'left' : 'right', label: 'REP expression' });
