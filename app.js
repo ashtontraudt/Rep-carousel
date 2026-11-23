@@ -310,13 +310,23 @@ Use lighter weights and slow down the lowering phase.`;
     return runs;
   }
   // words: [{ segs:[{t,b}], space:boolean(before) }]
+  // A piece made only of emoji (incl. skin tones, ZWJ sequences, flags, keycaps).
+  const EMOJI_ONLY = /^(?:\p{Extended_Pictographic}|\p{Regional_Indicator}|\p{Emoji_Modifier}|\u200D|\uFE0F|\u20E3)+$/u;
   function toWords(runs) {
     const words = [];
     let pendingSpace = false, cur = null;
     for (const r of runs) {
-      for (const piece of r.t.split(/(\s+)/)) {
+      // break only at ordinary whitespace; a typed non-breaking space (U+00A0 / U+202F) keeps words together
+      for (const piece of r.t.split(/([^\S\u00A0\u202F]+)/)) {
         if (!piece) continue;
-        if (/^\s+$/.test(piece)) { pendingSpace = true; cur = null; continue; }
+        if (/^[^\S\u00A0\u202F]+$/.test(piece)) { pendingSpace = true; cur = null; continue; }
+        if (pendingSpace && words.length && EMOJI_ONLY.test(piece)) {
+          // an emoji never starts a line: join it to the word before with a non-breaking space
+          cur = words[words.length - 1];
+          cur.segs.push({ t: '\u00A0', b: r.b, c: r.c }, { t: piece, b: r.b, c: r.c });
+          pendingSpace = false;
+          continue;
+        }
         if (cur && !pendingSpace) cur.segs.push({ t: piece, b: r.b, c: r.c });
         else { cur = { segs: [{ t: piece, b: r.b, c: r.c }], space: words.length > 0 && pendingSpace }; words.push(cur); }
         pendingSpace = false;
@@ -369,6 +379,20 @@ Use lighter weights and slow down the lowering phase.`;
     }
     return { words, width: lineWidth(ctx, words, o, size) };
   }
+  // Balanced wrapping (what CSS text-wrap: balance does): keep the greedy line count, but use the
+  // narrowest width that still gives that many lines, so the lines come out close to equal length.
+  function wrapBalanced(ctx, text, fontFn, size, maxW, upper) {
+    const out = [];
+    for (const para of String(text || '').split('\n')) {
+      const greedy = wrapRich(ctx, para, fontFn, size, maxW, upper);
+      if (greedy.length < 2 || greedy.some((l) => l.width > maxW + 0.5)) { out.push(...greedy); continue; }
+      const ok = (w) => { const ls = wrapRich(ctx, para, fontFn, size, w, upper); return ls.length <= greedy.length && ls.every((l) => l.width <= w + 0.5); };
+      let lo = 0, hi = maxW;
+      for (let k = 0; k < 24 && hi - lo > 0.5; k++) { const mid = (lo + hi) / 2; if (ok(mid)) hi = mid; else lo = mid; }
+      out.push(...wrapRich(ctx, para, fontFn, size, hi, upper));
+    }
+    return out;
+  }
   function fitRich(ctx, text, o) {
     let size = o.size;
     const maxLines = o.maxLines || 99;
@@ -377,7 +401,7 @@ Use lighter weights and slow down the lowering phase.`;
       const tooWide = lines.some((l) => l.width > o.maxW + 0.5);
       const h = lines.length * size * o.lh;
       const fits = !tooWide && lines.length <= maxLines && (!o.maxH || h <= o.maxH);
-      if (fits) return { lines, size };
+      if (fits) return { lines: o.balance ? wrapBalanced(ctx, text, o.font, size, o.maxW, o.upper) : lines, size };
       if (size - 2 < o.min) {
         // Still too big at the smallest size: cut lines and add an ellipsis instead of overflowing.
         let keep = Math.min(lines.length, maxLines);
@@ -532,7 +556,7 @@ Use lighter weights and slow down the lowering phase.`;
   // ---------- Slide renderers ----------
   const IMG_MIN = 320;            // smallest height an image area may shrink to
   const BOTTOM = H - M;           // bottom of the safe area
-  const HEAD_O = (size, min, extra) => ({ font: HEAD, size, min, lh: 1.04, ascent: 0.86, maxW: W - 2 * M, color: C.charcoal, ...extra });
+  const HEAD_O = (size, min, extra) => ({ font: HEAD, size, min, lh: 1.04, ascent: 0.86, maxW: W - 2 * M, color: C.charcoal, balance: true, ...extra });
   const BODY_O = (size, min, extra) => ({ font: BODY, size, min, lh: 1.38, ascent: 0.78, maxW: W - 2 * M, color: C.gray, ...extra });
   // Missing text: show a hint in the preview, leave it out of exported PNGs.
   const hint = (R, v, d) => (v && String(v).trim() ? v : R.exporting ? '' : d);
@@ -629,7 +653,11 @@ Use lighter weights and slow down the lowering phase.`;
         laid = segs.map((s) => ({ ...s, lines: wrapRich(ctx, s.t.replace(/\*\*/g, ''), HEAD, size, maxW, true) }));
         const n = laid.reduce((a, s) => a + s.lines.length, 0);
         const wide = laid.some((s) => s.lines.some((l) => l.width > maxW));
-        if (!wide && n * size * lh <= maxH) break;
+        if (!wide && n * size * lh <= maxH) {
+          // balance each title / accent line on its own (same number of lines, even lengths)
+          laid = laid.map((s) => ({ ...s, lines: wrapBalanced(ctx, s.t.replace(/\*\*/g, ''), HEAD, size, maxW, true) }));
+          break;
+        }
         if (size <= 64) {
           // cut extra lines from the end and mark with an ellipsis
           let room = Math.floor(maxH / (size * lh));

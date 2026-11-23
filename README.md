@@ -45,6 +45,11 @@ fields are `key: value` lines. `**double asterisks**` = bold orange text.
 the subtitle and the 80px bottom margin, centered and sitting on that margin. `bleed` fills the bottom
 and runs off the bottom edge (cropped). The 9:16 Reel slides never crop the cover image.
 
+Headlines, cover titles and accents, `[rank]` names and `[tier]` verdicts use balanced line wrapping
+(like CSS `text-wrap: balance`): same number of lines, but evenly long, so there are no lonely last
+words. An emoji is always kept on the same line as the word before it, and a typed non-breaking space
+(U+00A0) keeps two words together.
+
 On `[reference]` slides, exercise images are scaled as large as fits their grid cells (never cropped),
 each label sits 12px under its image, and the grid starts close to the breakdown text.
 
