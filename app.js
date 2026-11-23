@@ -575,6 +575,47 @@ Use lighter weights and slow down the lowering phase.`;
       }
   }
 
+  // [reference] exercise grid: 1 = large, 2 = side by side, 3 = 2 + 1 centered, 4 = 2x2. Slots 'ex0'..'ex3'.
+  // Each row is as tall as its images need when scaled to the cell width (shared out when space is short),
+  // so images are as large as fits without cropping. Images in a row sit on the same baseline and every
+  // label starts 12px below its image.
+  function referenceGrid(ctx, R, labels, gTop) {
+    const n = Math.max(1, Math.min(4, labels.length || 1));
+    const colGap = 30, rowGap = 28, LABEL_GAP = 12;
+    const rowsIdx = n === 1 ? [[0]] : n === 2 ? [[0, 1]] : n === 3 ? [[0, 1], [2]] : [[0, 1], [2, 3]];
+    const cellW = n === 1 ? W - 2 * M : (W - 2 * M - colGap) / 2;
+    const lo = { font: (s) => BODY(s, true), size: n === 1 ? 40 : 30, min: 24, lh: 1.15, ascent: 0.78, maxW: cellW - 10, maxLines: 2, color: C.gray, boldColor: C.orange, align: 'center' };
+    const fits = labels.slice(0, n).map((lab, i) => fitRich(ctx, lab, { ...lo, name: `Label ${i + 1}` }));
+    const labelH = (i) => (fits[i] ? fits[i].lines.length * fits[i].size * lo.lh : 0);
+    const aspect = (i) => { const e = R.slot('ex' + i); return e && e.img ? e.img.naturalHeight / e.img.naturalWidth : 1; }; // empty slot: square
+    const rows = rowsIdx.map((idx) => {
+      const lab = Math.max(0, ...idx.map(labelH));
+      return { idx, lab: lab ? lab + LABEL_GAP : 0, need: Math.max(...idx.map((i) => cellW * aspect(i))) };
+    });
+    // share the image height: rows that need less than an equal share give the rest to the others
+    let avail = BOTTOM - gTop - (rows.length - 1) * rowGap - rows.reduce((a, r) => a + r.lab, 0);
+    [...rows].sort((a, b) => a.need - b.need).forEach((r, k, arr) => {
+      r.h = Math.max(0, Math.min(r.need, avail / (arr.length - k)));
+      avail -= r.h;
+    });
+    let y = gTop;
+    for (const r of rows) {
+      r.idx.forEach((i, c) => {
+        const cx = n === 1 || (n === 3 && i === 2) ? (W - cellW) / 2 : M + c * (cellW + colGap);
+        placeImage(ctx, R, 'ex' + i, { x: cx, y, w: cellW, h: r.h }, { valign: 'bottom', label: 'Exercise ' + (i + 1) });
+        if (!fits[i]) return;
+        // place the label so its tallest letters start LABEL_GAP below the image
+        const sz = fits[i].size;
+        ctx.font = lo.font(sz, true);
+        const firstLine = fits[i].lines[0].words.map((w) => w.segs.map((sg) => sg.t).join('')).join(' ');
+        const top = ctx.measureText(firstLine).actualBoundingBoxAscent;
+        const ly = y + r.h + LABEL_GAP - (sz * lo.ascent + (sz * lo.lh - sz) / 2 - top);
+        drawLines(ctx, fits[i].lines, cx + cellW / 2, ly, sz, lo);
+      });
+      y += r.h + r.lab + rowGap;
+    }
+  }
+
   const RENDER = {
     cover(ctx, f, R) {
       const segs = [];
@@ -740,13 +781,13 @@ Use lighter weights and slow down the lowering phase.`;
         y += ns + 6;
       }
       y = divider(ctx, M, y + 6) + 26;
-      if (f.breakdown) y = richBlock(ctx, f.breakdown, M, y, BODY_O(34, 26, { lh: 1.3, maxW: leftW, maxLines: 2, name: 'Breakdown' })).bottom;
+      if (f.breakdown) y = richBlock(ctx, f.breakdown, M, y, BODY_O(41, 31, { lh: 1.3, maxW: leftW, maxLines: 3, name: 'Breakdown' })).bottom;
       // target muscle image top-right
       const tX = M + leftW + 30, tW = W - M - tX, tTop = TOP - 10;
       const tH = Math.max(260, y - tTop);
       placeImage(ctx, R, 'target', { x: tX, y: tTop, w: tW, h: tH }, { label: 'Target muscle' });
 
-      imageGrid(ctx, R, f.labels, Math.max(y, tTop + tH) + 44);
+      referenceGrid(ctx, R, f.labels, Math.max(y, tTop + tH) + 28);
     },
 
     tiergroup(ctx, f, R) {
