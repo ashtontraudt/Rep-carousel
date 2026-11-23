@@ -39,7 +39,9 @@ and `/ (root)` → Save. The site appears at `https://<user>.github.io/Rep-carou
 ## Slide syntax
 
 Separate slides with a line containing only `---`. First line of a block is the type in brackets;
-fields are `key: value` lines. `**double asterisks**` = bold orange text.
+fields are `key: value` lines. `**double asterisks**` = bold orange text. ` | ` (a pipe with a space on
+each side) in any text field forces a line break there. A number always stays on the same line as the
+word after it ("21 sets", "6–10 reps", "5 more days").
 
 `[cover]` takes an optional `fit`: `contain` (default) shows the whole image, scaled to fit between
 the subtitle and the 80px bottom margin, centered and sitting on that margin. `bleed` fills the bottom

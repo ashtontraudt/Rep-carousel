@@ -250,7 +250,10 @@ Use lighter weights and slow down the lowering phase.`;
       }
       const f = {};
       for (const k of KEYS[type]) {
-        const arr = raw[k] || [];
+        // " | " (spaces around a pipe) forces a line break in any text field
+        const arr = (raw[k] || []).map((x) => x
+          .replace(/\*\*([^*]+?)\*\*/g, (m, inner) => `**${inner.replace(/[ \t]+\|[ \t]+/g, '** | **')}**`) // keep **bold** on both lines
+          .replace(/[ \t]+\|[ \t]+/g, '\n'));
         if (LIST_KEYS.has(k)) f[k] = arr.map((x) => x.replace(/^[-•*]\s+/, '')).filter(Boolean);
         else if (type === 'cover' && (k === 'title' || k === 'accent')) f[k] = arr;
         else f[k] = arr.join('\n');
@@ -312,21 +315,26 @@ Use lighter weights and slow down the lowering phase.`;
   // words: [{ segs:[{t,b}], space:boolean(before) }]
   // A piece made only of emoji (incl. skin tones, ZWJ sequences, flags, keycaps).
   const EMOJI_ONLY = /^(?:\p{Extended_Pictographic}|\p{Regional_Indicator}|\p{Emoji_Modifier}|\u200D|\uFE0F|\u20E3)+$/u;
+  // A number token: 21, 2.5, 1,000, 6–10, 6-10, #11, $20, ~5, 10%, 3x, 5+ (not followed by punctuation).
+  const NUMBER_TOKEN = /^[#$~(]?\d+(?:[.,:]\d+)*(?:[–—-]\d+(?:[.,:]\d+)*)?(?:%|x|×|\+|k|K)?$/;
   function toWords(runs) {
     const words = [];
-    let pendingSpace = false, cur = null;
+    let pendingSpace = false, cur = null, afterNumber = false;
     for (const r of runs) {
       // break only at ordinary whitespace; a typed non-breaking space (U+00A0 / U+202F) keeps words together
       for (const piece of r.t.split(/([^\S\u00A0\u202F]+)/)) {
         if (!piece) continue;
         if (/^[^\S\u00A0\u202F]+$/.test(piece)) { pendingSpace = true; cur = null; continue; }
-        if (pendingSpace && words.length && EMOJI_ONLY.test(piece)) {
-          // an emoji never starts a line: join it to the word before with a non-breaking space
+        if (pendingSpace && words.length && (EMOJI_ONLY.test(piece) || afterNumber)) {
+          // an emoji never starts a line, and a number keeps the word after it ("21 sets", "6–10 reps"):
+          // join to the previous word with a non-breaking space
           cur = words[words.length - 1];
           cur.segs.push({ t: '\u00A0', b: r.b, c: r.c }, { t: piece, b: r.b, c: r.c });
           pendingSpace = false;
+          afterNumber = NUMBER_TOKEN.test(piece);
           continue;
         }
+        afterNumber = NUMBER_TOKEN.test(piece) && !(cur && !pendingSpace); // a whole word that is a number
         if (cur && !pendingSpace) cur.segs.push({ t: piece, b: r.b, c: r.c });
         else { cur = { segs: [{ t: piece, b: r.b, c: r.c }], space: words.length > 0 && pendingSpace }; words.push(cur); }
         pendingSpace = false;
@@ -846,7 +854,12 @@ Use lighter weights and slow down the lowering phase.`;
       const n = Math.max(1, items.length);
       const io = BODY_O(40, 30, { color: C.gray, boldColor: C.orange });
       const gap = 24;
-      const texts = items.map((it) => `\u0001${it.name.replace(/\*\*/g, '')}${it.reason ? ':' : ''}\u0001${it.reason ? ' ' + it.reason : ''}`);
+      const texts = items.map((it) => {
+        // bold-charcoal name (each line of it marked separately, so " | " breaks work), then the reason
+        const parts = it.name.replace(/\*\*/g, '').split('\n');
+        const name = parts.map((x, k) => `\u0001${x}${k === parts.length - 1 && it.reason ? ':' : ''}\u0001`).join('\n');
+        return name + (it.reason ? ' ' + it.reason : '');
+      });
       const gridMin = n <= 2 ? 440 : 600; // keep the images a useful size
       const room = BOTTOM - gridMin - 44 - y;
       const heightAt = (sz) => texts.reduce((a, t) => a + wrapRich(ctx, t, BODY, sz, io.maxW).length * sz * io.lh + gap, -gap);
@@ -888,8 +901,9 @@ Use lighter weights and slow down the lowering phase.`;
     explainer(ctx, f, R) {
       let y = TOP - 4;
       if (f.label) {
-        spacedLabel(ctx, f.label, M, y + 26, W - 2 * M, 'left', 'Label');
-        y += 34 + 30;
+        const parts = f.label.split('\n'); // " | " in the label makes extra lines
+        parts.forEach((t, i) => spacedLabel(ctx, t, M, y + 26 + i * 40, W - 2 * M, 'left', 'Label'));
+        y += 34 + 30 + (parts.length - 1) * 40;
       }
       const imgMin = 400; // keep REP clearly visible
       y = richBlock(ctx, hint(R, f.headline, 'Headline'), M, y, HEAD_O(116, 60, { maxLines: 3, name: 'Headline' })).bottom + 34;
