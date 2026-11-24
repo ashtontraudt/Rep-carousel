@@ -52,11 +52,13 @@ Headlines, cover titles and accents, `[rank]` names and `[tier]` verdicts use ba
 words. An emoji is always kept on the same line as the word before it, and a typed non-breaking space
 (U+00A0) keeps two words together.
 
-On `[reference]` slides, exercise images are scaled as large as fits their grid cells (never cropped),
-laid out by their visible pixels so a transparent margin around the figure doesn't make it look small;
-each label sits 12px under the visible figure, and the grid starts close to the breakdown text. The
-target-muscle image shrinks to fit beside the headline, number and breakdown, so it never pushes the
-exercise images down.
+`[reference]` slides use fixed proportions (1080×1350 base, scaled for 9:16): the top section (headline,
+number and breakdown on the left, target-muscle image on the right) is at most 480px tall, shrinking the
+left column if needed; the target-muscle image is at most 340×440 and never taller than the left column.
+The exercise grid gets all remaining space down to the bottom margin: 1 image = one full-width cell,
+2 = side by side, 3 = 2 on top + 1 centered, 4 = 2×2, in 440px-wide columns with equal rows. Images are
+trimmed of transparent padding, scaled as large as fits their cell without cropping, and each label sits
+12px below its image.
 
 `[explainer]` takes an optional `corner`: `right` (default) or `left` puts a small REP image in that
 bottom corner; `center` scales it as large as fits between the body text and the 80px bottom margin,

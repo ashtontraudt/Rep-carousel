@@ -658,44 +658,35 @@ Use lighter weights and slow down the lowering phase.`;
       }
   }
 
-  // [reference] exercise grid: 1 = large, 2 = side by side, 3 = 2 + 1 centered, 4 = 2x2. Slots 'ex0'..'ex3'.
-  // Each row is as tall as its images need when scaled to the cell width (shared out when space is short),
-  // so images are as large as fits without cropping. Images in a row sit on the same baseline and every
-  // label starts 12px below its image.
+  // [reference] exercise grid, fixed cells filling everything from gTop to the bottom margin:
+  // 1 = one full-width cell, 2 = side by side, 3 = 2 on top + 1 centered, 4 = 2x2 (columns 440px wide).
+  // Images are trimmed of transparent padding, scaled as large as fits the cell without cropping,
+  // sit on the cell's baseline, and each label starts 12px below its image. Slots 'ex0'..'ex3'.
   function referenceGrid(ctx, R, labels, gTop) {
     const n = Math.max(1, Math.min(4, labels.length || 1));
-    const colGap = 30, rowGap = 28, LABEL_GAP = 12;
+    const colGap = 40, rowGap = 20, LABEL_GAP = 12;
     const rowsIdx = n === 1 ? [[0]] : n === 2 ? [[0, 1]] : n === 3 ? [[0, 1], [2]] : [[0, 1], [2, 3]];
     const cellW = n === 1 ? W - 2 * M : (W - 2 * M - colGap) / 2;
+    const cellH = (BOTTOM - gTop - (rowsIdx.length - 1) * rowGap) / rowsIdx.length;
     const lo = { font: (s) => BODY(s, true), size: n === 1 ? 40 : 30, min: 24, lh: 1.15, ascent: 0.78, maxW: cellW - 10, maxLines: 2, color: C.gray, boldColor: C.orange, align: 'center' };
     const fits = labels.slice(0, n).map((lab, i) => fitRich(ctx, lab, { ...lo, name: `Label ${i + 1}` }));
     const labelH = (i) => (fits[i] ? fits[i].lines.length * fits[i].size * lo.lh : 0);
-    const aspect = (i) => { const e = R.slot('ex' + i); if (!e || !e.img) return 1; const v = visibleBox(e); return v.h / v.w; }; // empty slot: square
-    const rows = rowsIdx.map((idx) => {
-      const lab = Math.max(0, ...idx.map(labelH));
-      return { idx, lab: lab ? lab + LABEL_GAP : 0, need: Math.max(...idx.map((i) => cellW * aspect(i))) };
-    });
-    // share the image height: rows that need less than an equal share give the rest to the others
-    let avail = BOTTOM - gTop - (rows.length - 1) * rowGap - rows.reduce((a, r) => a + r.lab, 0);
-    [...rows].sort((a, b) => a.need - b.need).forEach((r, k, arr) => {
-      r.h = Math.max(0, Math.min(r.need, avail / (arr.length - k)));
-      avail -= r.h;
-    });
     let y = gTop;
-    for (const r of rows) {
-      r.idx.forEach((i, c) => {
+    for (const idx of rowsIdx) {
+      const lab = Math.max(0, ...idx.map(labelH));
+      const imgH = cellH - (lab ? lab + LABEL_GAP : 0);
+      idx.forEach((i, c) => {
         const cx = n === 1 || (n === 3 && i === 2) ? (W - cellW) / 2 : M + c * (cellW + colGap);
-        placeImage(ctx, R, 'ex' + i, { x: cx, y, w: cellW, h: r.h }, { valign: 'bottom', trim: true, label: 'Exercise ' + (i + 1) });
+        placeImage(ctx, R, 'ex' + i, { x: cx, y, w: cellW, h: imgH }, { valign: 'bottom', trim: true, label: 'Exercise ' + (i + 1) });
         if (!fits[i]) return;
-        // place the label so its tallest letters start LABEL_GAP below the image
+        // the label's tallest letters start LABEL_GAP below the image
         const sz = fits[i].size;
         ctx.font = lo.font(sz, true);
         const firstLine = fits[i].lines[0].words.map((w) => w.segs.map((sg) => sg.t).join('')).join(' ');
         const top = ctx.measureText(firstLine).actualBoundingBoxAscent;
-        const ly = y + r.h + LABEL_GAP - (sz * lo.ascent + (sz * lo.lh - sz) / 2 - top);
-        drawLines(ctx, fits[i].lines, cx + cellW / 2, ly, sz, lo);
+        drawLines(ctx, fits[i].lines, cx + cellW / 2, y + imgH + LABEL_GAP - (sz * lo.ascent + (sz * lo.lh - sz) / 2 - top), sz, lo);
       });
-      y += r.h + r.lab + rowGap;
+      y += cellH + rowGap;
     }
   }
 
@@ -856,26 +847,44 @@ Use lighter weights and slow down the lowering phase.`;
     },
 
     reference(ctx, f, R) {
-      let y = TOP - 10;
-      const leftW = 500;
-      y = richBlock(ctx, hint(R, f.headline, 'Muscle'), M, y, HEAD_O(110, 60, { maxW: leftW, maxLines: 2, name: 'Headline' })).bottom + 8;
-      if (f.number) {
-        let ns = 230;
-        ctx.font = HEAD(ns);
-        while (ns > 120 && ctx.measureText(f.number).width > leftW) { ns -= 10; ctx.font = HEAD(ns); }
-        ctx.fillStyle = C.orange;
-        ctx.fillText(f.number, M - 4, y + ns * 0.86);
-        y += ns + 6;
-      }
-      y = divider(ctx, M, y + 6) + 26;
-      if (f.breakdown) y = richBlock(ctx, f.breakdown, M, y, BODY_O(41, 31, { lh: 1.3, maxW: leftW, maxLines: 3, name: 'Breakdown' })).bottom;
-      // target muscle image top-right
-      const tX = M + leftW + 30, tW = W - M - tX, tTop = TOP - 10;
-      // the target muscle never sets the height of the top section: it shrinks to fit beside the text
-      const tH = y - tTop;
-      placeImage(ctx, R, 'target', { x: tX, y: tTop, w: tW, h: tH }, { trim: true, label: 'Target muscle' });
-
-      referenceGrid(ctx, R, f.labels, Math.max(y, tTop + tH) + 28);
+      // Fixed proportions (1080x1350 base): top section up to 480px tall, grid gets everything below.
+      const top0 = TOP - 10, TOP_MAX = 480, leftW = 500;
+      const T_W = 340, T_H = 440; // target-muscle image limits
+      // Left column (headline, number, divider, breakdown) at scale k; returns its bottom y.
+      const leftColumn = (k, draw) => {
+        let y = top0;
+        const ho = HEAD_O(Math.round(110 * k), Math.round(60 * k), { maxW: leftW, maxLines: 2, name: 'Headline' });
+        const hf = fitRich(ctx, hint(R, f.headline, 'Muscle'), ho);
+        if (draw) drawLines(ctx, hf.lines, M, y, hf.size, ho);
+        y += hf.lines.length * hf.size * ho.lh + 8;
+        if (f.number) {
+          let ns = Math.round(230 * k);
+          ctx.font = HEAD(ns);
+          while (ns > 100 && ctx.measureText(f.number).width > leftW) { ns -= 10; ctx.font = HEAD(ns); }
+          if (draw) { ctx.fillStyle = C.orange; ctx.fillText(f.number, M - 4, y + ns * 0.86); }
+          y += ns + 6;
+        }
+        if (draw) divider(ctx, M, y + 6);
+        y += 6 + 7 + Math.round(26 * k);
+        if (f.breakdown) {
+          const bo = BODY_O(Math.round(41 * k), Math.round(31 * k), { lh: 1.3, maxW: leftW, maxLines: 3, name: 'Breakdown' });
+          const bf = fitRich(ctx, f.breakdown, bo);
+          if (draw) drawLines(ctx, bf.lines, M, y, bf.size, bo);
+          y += bf.lines.length * bf.size * bo.lh;
+        }
+        return y;
+      };
+      // shrink the left column together until the top section fits in TOP_MAX
+      const keep = renderWarnings;
+      renderWarnings = null; // measuring passes must not leave warnings behind
+      let k = 1;
+      while (k > 0.6 && leftColumn(k, false) - top0 > TOP_MAX) k = Math.round((k - 0.05) * 100) / 100;
+      renderWarnings = keep;
+      const leftBottom = leftColumn(k, true);
+      // target-muscle image: top right, at most 340 x 440 and never taller than the left column
+      const tH = Math.min(T_H, leftBottom - top0);
+      placeImage(ctx, R, 'target', { x: W - M - T_W, y: top0, w: T_W, h: tH }, { trim: true, label: 'Target muscle' });
+      referenceGrid(ctx, R, f.labels, Math.max(leftBottom, top0 + tH) + 24);
     },
 
     tiergroup(ctx, f, R) {
