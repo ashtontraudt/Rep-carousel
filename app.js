@@ -487,6 +487,54 @@ Use lighter weights and slow down the lowering phase.`;
   }
 
   // Draw an image (or placeholder) contained in box. opts.valign: 'center' | 'bottom' | 'top'; opts.halign
+  // Bounding box of an image's visible (not fully transparent) pixels, in source pixels; cached per image.
+  // Scanned on a small copy, then rounded outward so no visible pixel is ever cut off.
+  function visibleBox(entry) {
+    if (entry.visible) return entry.visible;
+    const im = entry.img, iw = im.naturalWidth, ih = im.naturalHeight;
+    let box = { x: 0, y: 0, w: iw, h: ih };
+    try {
+      const sc = Math.min(1, 400 / Math.max(iw, ih));
+      const cw = Math.max(1, Math.round(iw * sc)), ch = Math.max(1, Math.round(ih * sc));
+      const c = document.createElement('canvas');
+      c.width = cw; c.height = ch;
+      const g = c.getContext('2d', { willReadFrequently: true });
+      g.drawImage(im, 0, 0, cw, ch);
+      const d = g.getImageData(0, 0, cw, ch).data;
+      let x0 = cw, y0 = ch, x1 = -1, y1 = -1;
+      for (let y = 0; y < ch; y++) {
+        for (let x = 0; x < cw; x++) {
+          if (d[(y * cw + x) * 4 + 3] > 0) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+        }
+      }
+      if (x1 >= 0) {
+        // coarse box, rounded outward (it always contains every visible pixel)
+        let L = Math.max(0, Math.floor((x0 - 1) / sc)), T = Math.max(0, Math.floor((y0 - 1) / sc));
+        let Rr = Math.min(iw, Math.ceil((x1 + 2) / sc)), B = Math.min(ih, Math.ceil((y1 + 2) / sc));
+        // refine each edge at full resolution, reading only a narrow strip along it
+        const span = Math.ceil(4 / sc) + 2;
+        const read = (x, y, w, h) => {
+          c.width = w; c.height = h;
+          g.clearRect(0, 0, w, h);
+          g.drawImage(im, x, y, w, h, 0, 0, w, h);
+          return g.getImageData(0, 0, w, h).data;
+        };
+        const colHas = (d, w, h, i) => { for (let k = 0; k < h; k++) if (d[(k * w + i) * 4 + 3] > 0) return true; return false; };
+        const rowHas = (d, w, j) => { for (let k = 0; k < w; k++) if (d[(j * w + k) * 4 + 3] > 0) return true; return false; };
+        let sw = Math.min(span, Rr - L), d = read(L, T, sw, B - T);
+        for (let i = 0; i < sw; i++) if (colHas(d, sw, B - T, i)) { L += i; break; }
+        sw = Math.min(span, Rr - L); d = read(Rr - sw, T, sw, B - T);
+        for (let i = sw - 1; i >= 0; i--) if (colHas(d, sw, B - T, i)) { Rr = Rr - sw + i + 1; break; }
+        let sh = Math.min(span, B - T); d = read(L, T, Rr - L, sh);
+        for (let j = 0; j < sh; j++) if (rowHas(d, Rr - L, j)) { T += j; break; }
+        sh = Math.min(span, B - T); d = read(L, B - sh, Rr - L, sh);
+        for (let j = sh - 1; j >= 0; j--) if (rowHas(d, Rr - L, j)) { B = B - sh + j + 1; break; }
+        box = { x: L, y: T, w: Rr - L, h: B - T };
+      }
+    } catch { /* unreadable pixels: use the whole image */ }
+    entry.visible = box;
+    return box;
+  }
   function placeImage(ctx, R, slotKey, box, opts = {}) {
     if (R.reel) {
       // Reel slides: images that normally bleed off the slide edge stay inside the margins,
@@ -499,12 +547,15 @@ Use lighter weights and slow down the lowering phase.`;
     const entry = R.slot(slotKey);
     if (entry && entry.img) {
       const im = entry.img;
-      const s = Math.min(box.w / im.naturalWidth, box.h / im.naturalHeight);
-      const w = im.naturalWidth * s, h = im.naturalHeight * s;
+      // opts.trim: lay out by the visible pixels, ignoring a transparent margin around the figure
+      const src = opts.trim ? visibleBox(entry) : { x: 0, y: 0, w: im.naturalWidth, h: im.naturalHeight };
+      const s = Math.min(box.w / src.w, box.h / src.h);
+      const w = src.w * s, h = src.h * s;
       const ha = opts.halign || 'center', va = opts.valign || 'center';
       const x = ha === 'left' ? box.x : ha === 'right' ? box.x + box.w - w : box.x + (box.w - w) / 2;
       const y = va === 'top' ? box.y : va === 'bottom' ? box.y + box.h - h : box.y + (box.h - h) / 2;
-      ctx.drawImage(im, x, y, w, h);
+      if (opts.trim) ctx.drawImage(im, src.x, src.y, src.w, src.h, x, y, w, h);
+      else ctx.drawImage(im, x, y, w, h);
     } else if (!R.exporting) {
       // dashed placeholder (preview only), clipped to canvas
       const bx = Math.max(box.x, 24), by = box.y, bw = Math.min(box.x + box.w, W - 24) - bx;
@@ -619,7 +670,7 @@ Use lighter weights and slow down the lowering phase.`;
     const lo = { font: (s) => BODY(s, true), size: n === 1 ? 40 : 30, min: 24, lh: 1.15, ascent: 0.78, maxW: cellW - 10, maxLines: 2, color: C.gray, boldColor: C.orange, align: 'center' };
     const fits = labels.slice(0, n).map((lab, i) => fitRich(ctx, lab, { ...lo, name: `Label ${i + 1}` }));
     const labelH = (i) => (fits[i] ? fits[i].lines.length * fits[i].size * lo.lh : 0);
-    const aspect = (i) => { const e = R.slot('ex' + i); return e && e.img ? e.img.naturalHeight / e.img.naturalWidth : 1; }; // empty slot: square
+    const aspect = (i) => { const e = R.slot('ex' + i); if (!e || !e.img) return 1; const v = visibleBox(e); return v.h / v.w; }; // empty slot: square
     const rows = rowsIdx.map((idx) => {
       const lab = Math.max(0, ...idx.map(labelH));
       return { idx, lab: lab ? lab + LABEL_GAP : 0, need: Math.max(...idx.map((i) => cellW * aspect(i))) };
@@ -634,7 +685,7 @@ Use lighter weights and slow down the lowering phase.`;
     for (const r of rows) {
       r.idx.forEach((i, c) => {
         const cx = n === 1 || (n === 3 && i === 2) ? (W - cellW) / 2 : M + c * (cellW + colGap);
-        placeImage(ctx, R, 'ex' + i, { x: cx, y, w: cellW, h: r.h }, { valign: 'bottom', label: 'Exercise ' + (i + 1) });
+        placeImage(ctx, R, 'ex' + i, { x: cx, y, w: cellW, h: r.h }, { valign: 'bottom', trim: true, label: 'Exercise ' + (i + 1) });
         if (!fits[i]) return;
         // place the label so its tallest letters start LABEL_GAP below the image
         const sz = fits[i].size;
@@ -820,8 +871,9 @@ Use lighter weights and slow down the lowering phase.`;
       if (f.breakdown) y = richBlock(ctx, f.breakdown, M, y, BODY_O(41, 31, { lh: 1.3, maxW: leftW, maxLines: 3, name: 'Breakdown' })).bottom;
       // target muscle image top-right
       const tX = M + leftW + 30, tW = W - M - tX, tTop = TOP - 10;
-      const tH = Math.max(260, y - tTop);
-      placeImage(ctx, R, 'target', { x: tX, y: tTop, w: tW, h: tH }, { label: 'Target muscle' });
+      // the target muscle never sets the height of the top section: it shrinks to fit beside the text
+      const tH = y - tTop;
+      placeImage(ctx, R, 'target', { x: tX, y: tTop, w: tW, h: tH }, { trim: true, label: 'Target muscle' });
 
       referenceGrid(ctx, R, f.labels, Math.max(y, tTop + tH) + 28);
     },

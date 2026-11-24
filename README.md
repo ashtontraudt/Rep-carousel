@@ -53,7 +53,10 @@ words. An emoji is always kept on the same line as the word before it, and a typ
 (U+00A0) keeps two words together.
 
 On `[reference]` slides, exercise images are scaled as large as fits their grid cells (never cropped),
-each label sits 12px under its image, and the grid starts close to the breakdown text.
+laid out by their visible pixels so a transparent margin around the figure doesn't make it look small;
+each label sits 12px under the visible figure, and the grid starts close to the breakdown text. The
+target-muscle image shrinks to fit beside the headline, number and breakdown, so it never pushes the
+exercise images down.
 
 `[explainer]` takes an optional `corner`: `right` (default) or `left` puts a small REP image in that
 bottom corner; `center` scales it as large as fits between the body text and the 80px bottom margin,
