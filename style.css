@@ -254,6 +254,26 @@ select { min-height: 44px; border-radius: 10px; border: 1px solid var(--line); b
 .export-grid .field { min-width: 0; }
 .export-grid .field[hidden] { display: none; }
 @media (max-width: 420px) { .export-grid { grid-template-columns: minmax(0, 1fr); } }
+.beat-panel { width: 100%; display: flex; flex-direction: column; gap: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+.beat-panel[hidden] { display: none; }
+.beat-panel input[type=number] { min-height: 44px; border-radius: 10px; border: 1px solid var(--line); background: #fff; padding: 0 10px; text-transform: none; letter-spacing: 0; font-weight: 500; color: var(--charcoal); width: 100%; }
+.beat-row { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; }
+.beat-bpm { flex: 0 0 96px; min-width: 0; }
+.beat-tap { flex: 1; min-width: 140px; touch-action: manipulation; user-select: none; -webkit-user-select: none; }
+.beat-tap.hit { background: var(--charcoal); }
+.beat-hint { color: var(--gray); }
+.beat-hint.ok { color: var(--charcoal); font-weight: 600; }
+.beat-offset { flex: none; width: 100%; max-width: 300px; min-width: 0; }
+.beat-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.beat-all { display: flex; gap: 4px; }
+.beat-list { display: flex; flex-direction: column; gap: 6px; width: 100%; }
+.beat-item { display: grid; grid-template-columns: 20px minmax(0, 1fr) 84px 46px; gap: 8px; align-items: center; font-size: 13.5px; }
+.beat-no { color: var(--gray); font-weight: 700; text-align: right; }
+.beat-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.beat-name b { font-weight: 700; text-transform: uppercase; font-size: 11px; letter-spacing: .08em; color: var(--orange); margin-right: 6px; }
+.beat-item select { width: 100%; min-width: 0; min-height: 36px; padding: 0 6px; }
+.beat-sec { color: var(--gray); font-variant-numeric: tabular-nums; text-align: right; }
+.vid-warn { color: #9b3d1a; }
 .vid-progress { width: 100%; height: 8px; border-radius: 4px; background: var(--cream-2); overflow: hidden; }
 .vid-progress > div { height: 100%; width: 0; background: var(--orange); transition: width .15s linear; }
 .vid-msg:empty { display: none; }

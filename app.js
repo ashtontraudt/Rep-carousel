@@ -1408,21 +1408,216 @@ Use lighter weights and slow down the lowering phase.`;
   const TRANS_SEC = 0.5;
   let vidBlob = null, vidUrl = null, vidBusy = false;
 
+  // ----- Beat sync: slide changes land on the beats of a song (BPM + first-beat offset) -----
+  const BEAT_CHOICES = [1, 2, 3, 4, 6, 8, 12, 16];
+  // roughly how long each slide type needs to be read, used for the Auto beat counts
+  const READ_SEC = { cover: 2.5, tip: 3.5, rank: 3, tier: 2, tiergroup: 5, reference: 4, cta: 4, explainer: 5 };
+  const clampBpm = (v) => Math.min(240, Math.max(40, +v || 120));
+  const beatSec = () => 60 / clampBpm(work && work.bpm);
+  const beatOffset = () => Math.min(10, Math.max(0, +(work && work.offset) || 0));
+  function autoBeats(s) {
+    const want = (READ_SEC[s.type] || 3) / beatSec();
+    // nearest musical count; slides shorter than a beat get 1
+    return BEAT_CHOICES.reduce((a, b) => (Math.abs(b - want) < Math.abs(a - want) ? b : a), 1);
+  }
+  const beatsFor = (i) => {
+    const v = work && work.beats && work.beats[i];
+    return BEAT_CHOICES.includes(v) ? v : autoBeats(slides[i]);
+  };
+  // seconds each slide is on screen; the first slide also covers the lead-in before the first beat
+  function slideDurations(o) {
+    if (o.sec !== 'beat') return slides.map(() => +o.sec);
+    const spb = beatSec();
+    return slides.map((s, i) => beatsFor(i) * spb + (i === 0 ? beatOffset() : 0));
+  }
+  function slideLabel(s) {
+    const f = s.f || {};
+    const pick = ['title', 'headline', 'name', 'letter', 'label'].map((k) => f[k]).find((v) => v && String(v).trim());
+    const txt = Array.isArray(pick) ? pick.join(' ') : String(pick || '');
+    return txt.replace(/\*\*/g, '').replace(/[ \t]+\|[ \t]+/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+  function saveBeatSettings() {
+    storeWorkingCopy();
+    clearVideo();
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => { flushSave(); }, 700);
+    updateVidInfo();
+  }
+  function renderBeatList() {
+    const box = $('beatList');
+    box.innerHTML = '';
+    const spb = beatSec();
+    slides.forEach((s, i) => {
+      const row = document.createElement('div');
+      row.className = 'beat-item';
+      const no = document.createElement('span'); no.className = 'beat-no'; no.textContent = i + 1;
+      const nm = document.createElement('span'); nm.className = 'beat-name';
+      nm.innerHTML = `<b>${esc(s.type)}</b>${esc(slideLabel(s))}`;
+      nm.title = slideLabel(s);
+      const sel = document.createElement('select');
+      sel.setAttribute('aria-label', `Beats for slide ${i + 1}`);
+      const set = work.beats && BEAT_CHOICES.includes(work.beats[i]);
+      sel.innerHTML = `<option value="">Auto: ${autoBeats(s)}</option>` +
+        BEAT_CHOICES.map((b) => `<option value="${b}"${set && work.beats[i] === b ? ' selected' : ''}>${b} beat${b > 1 ? 's' : ''}</option>`).join('');
+      const sec = document.createElement('span'); sec.className = 'beat-sec';
+      sec.textContent = (beatsFor(i) * spb).toFixed(1) + ' s';
+      sel.onchange = () => {
+        work.beats = (work.beats || []).slice();
+        work.beats[i] = sel.value ? +sel.value : null;
+        sec.textContent = (beatsFor(i) * spb).toFixed(1) + ' s';
+        saveBeatSettings();
+      };
+      row.append(no, nm, sel, sec);
+      box.appendChild(row);
+    });
+  }
+  function showBeatPanel() {
+    const on = $('vidSec').value === 'beat';
+    $('beatPanel').hidden = !on;
+    if (!on) { stopMetro(); return; }
+    $('vidBpm').value = clampBpm(work.bpm);
+    $('vidOffset').value = beatOffset();
+    renderBeatList();
+  }
+  $('vidBpm').addEventListener('change', () => {
+    work.bpm = clampBpm($('vidBpm').value);
+    $('vidBpm').value = work.bpm;
+    renderBeatList();
+    saveBeatSettings();
+  });
+  $('vidOffset').addEventListener('change', () => {
+    work.offset = Math.round(Math.min(10, Math.max(0, +$('vidOffset').value || 0)) * 100) / 100;
+    $('vidOffset').value = work.offset;
+    saveBeatSettings();
+  });
+  document.querySelectorAll('[data-all]').forEach((b) => b.addEventListener('click', () => {
+    const v = b.dataset.all;
+    work.beats = v === 'auto' ? [] : slides.map(() => +v);
+    renderBeatList();
+    saveBeatSettings();
+  }));
+
+  // Tap tempo: average the gaps between the last few taps. A pause over 2 s starts a new count.
+  let taps = [];
+  $('btnTap').addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    const now = performance.now();
+    if (taps.length && now - taps[taps.length - 1] > 2000) taps = [];
+    taps.push(now);
+    if (taps.length > 12) taps.shift();
+    const btn = $('btnTap'), hint = $('tapHint');
+    btn.classList.add('hit');
+    setTimeout(() => btn.classList.remove('hit'), 90);
+    if (taps.length < 4) {
+      hint.className = 'small beat-hint';
+      hint.textContent = taps.length === 1 ? 'Keep tapping…' : `Keep tapping… ${4 - taps.length} more`;
+      return;
+    }
+    const gaps = taps.slice(1).map((t, k) => t - taps[k]);
+    const bpm = clampBpm(Math.round(60000 / (gaps.reduce((a, b) => a + b, 0) / gaps.length)));
+    work.bpm = bpm;
+    $('vidBpm').value = bpm;
+    hint.className = 'small beat-hint ok';
+    hint.textContent = `${bpm} BPM from ${taps.length} taps. Keep tapping to fine-tune, or press ▶ Click to check it against the song.`;
+    renderBeatList();
+    saveBeatSettings();
+  });
+
+  // Clicks: Web Audio, so they are timed to the sample, not to the screen.
+  let audioCtx = null;
+  function getAC() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    return audioCtx;
+  }
+  function click(time, accent) {
+    const ac = getAC();
+    const osc = ac.createOscillator(), gain = ac.createGain();
+    osc.frequency.value = accent ? 1760 : 1100;
+    gain.gain.setValueAtTime(0.0001, time);
+    gain.gain.exponentialRampToValueAtTime(accent ? 0.6 : 0.35, time + 0.002);
+    gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.06);
+    osc.connect(gain).connect(ac.destination);
+    osc.start(time);
+    osc.stop(time + 0.07);
+    return osc;
+  }
+  let metroTimer = null;
+  function stopMetro() {
+    clearInterval(metroTimer);
+    metroTimer = null;
+    $('btnMetro').textContent = '▶ Click';
+  }
+  $('btnMetro').onclick = () => {
+    if (metroTimer) return stopMetro();
+    const ac = getAC();
+    let next = ac.currentTime + 0.06, k = 0;
+    metroTimer = setInterval(() => {
+      while (next < ac.currentTime + 0.2) { click(next, k % 4 === 0); next += beatSec(); k++; }
+    }, 25);
+    $('btnMetro').textContent = '■ Stop';
+  };
+
   function vidOptions() {
-    return { format: $('vidFormat').value, sec: +$('vidSec').value, trans: $('vidTrans').value };
+    const o = { format: $('vidFormat').value, sec: $('vidSec').value === 'beat' ? 'beat' : +$('vidSec').value, trans: $('vidTrans').value };
+    o.durs = slideDurations(o);
+    o.total = o.durs.reduce((a, b) => a + b, 0);
+    return o;
   }
   function updateVidInfo() {
     const o = vidOptions();
-    const total = slides.length * o.sec;
-    $('vidLength').textContent = slides.length ? `${slides.length} slide${slides.length > 1 ? 's' : ''} × ${o.sec} s = ${total} s video` : '';
+    const el = $('vidLength');
+    el.className = 'muted small';
+    if (!slides.length) { el.textContent = ''; return; }
+    const n = `${slides.length} slide${slides.length > 1 ? 's' : ''}`;
+    if (o.sec === 'beat') {
+      const beats = slides.reduce((a, s, i) => a + beatsFor(i), 0);
+      el.textContent = `${n} · ${beats} beats at ${clampBpm(work.bpm)} BPM = ${o.total.toFixed(1)} s video`;
+      if (o.total > 90) { el.className = 'small vid-warn'; el.textContent += '. Over 90 s: Instagram music may stop before the video ends.'; }
+    } else {
+      el.textContent = `${n} × ${o.sec} s = ${o.total} s video`;
+    }
   }
-  ['vidFormat', 'vidSec', 'vidTrans'].forEach((id) => $(id).addEventListener('change', () => { updateVidInfo(); clearVideo(); }));
+  ['vidFormat', 'vidSec', 'vidTrans'].forEach((id) => $(id).addEventListener('change', () => {
+    if (id === 'vidSec') { LS.set('rep.vidSec', $('vidSec').value); showBeatPanel(); }
+    updateVidInfo(); clearVideo();
+  }));
+  { const saved = LS.get('rep.vidSec', null); if (saved && [...$('vidSec').options].some((op) => op.value === saved)) $('vidSec').value = saved; }
+
+  // Preview the made video with clicks on every beat (accent on slide changes).
+  let vidTiming = null, clickNodes = [], clicksArmedAt = 0;
+  function stopClicks() { clickNodes.forEach((n) => { try { n.stop(); } catch { /* already stopped */ } }); clickNodes = []; }
+  $('btnPlayBeat').onclick = async () => {
+    if (!vidTiming) return;
+    const v = $('vidPreview');
+    stopClicks(); stopMetro();
+    v.loop = false;
+    v.pause();
+    v.currentTime = 0;
+    const ac = getAC();
+    await ac.resume();
+    try { await v.play(); } catch { return; }
+    const base = ac.currentTime - v.currentTime;
+    clicksArmedAt = performance.now();
+    const { spb, offset, total, changes } = vidTiming;
+    for (let t = offset; t < total - 0.01; t += spb) {
+      const accent = changes.some((c) => Math.abs(c - t) < 0.01);
+      clickNodes.push(click(base + t, accent));
+    }
+  };
+  ['pause', 'seeking', 'ended'].forEach((ev) => $('vidPreview').addEventListener(ev, () => {
+    if (!clickNodes.length || performance.now() - clicksArmedAt < 300) return; // ignore our own restart
+    stopClicks();
+    if (ev !== 'seeking') $('vidPreview').loop = true;
+  }));
 
   function clearVideo() {
+    stopClicks();
     if (vidUrl) URL.revokeObjectURL(vidUrl);
-    vidUrl = null; vidBlob = null;
+    vidUrl = null; vidBlob = null; vidTiming = null;
     $('vidPreview').removeAttribute('src');
     $('vidResult').hidden = true;
+    $('btnPlayBeat').hidden = true;
   }
   async function pickCodec(width, height) {
     if (!('VideoEncoder' in window) || typeof Mp4Muxer === 'undefined') return null;
@@ -1467,15 +1662,20 @@ Use lighter weights and slow down the lowering phase.`;
     const enc = new VideoEncoder({ output: (chunk, meta) => muxer.addVideoChunk(chunk, meta), error: (e) => { encErr = e; } });
     enc.configure(cfg);
 
-    const n = pics.length, hold = o.sec;
-    const tr = o.trans === 'cut' ? 0 : TRANS_SEC;
-    const total = Math.round(n * hold * VID_FPS);
+    // Each slide holds for o.durs[i] seconds. The transition into the next slide finishes exactly
+    // at the change time, so with beat sync the new slide lands on the beat.
+    const n = pics.length, durs = o.durs;
+    const starts = [];
+    durs.reduce((acc, d, k) => { starts[k] = acc; return acc + d; }, 0);
+    const total = Math.round(o.total * VID_FPS);
     const step = VW; // distance between cards during a swipe
+    let i = 0;
     for (let f = 0; f < total; f++) {
       if (encErr) throw encErr;
       const t = f / VID_FPS;
-      const i = Math.min(n - 1, Math.floor(t / hold));
-      const local = t - i * hold;
+      while (i < n - 1 && t >= starts[i + 1] - 1e-6) i++;
+      const hold = durs[i], local = t - starts[i];
+      const tr = o.trans === 'cut' ? 0 : Math.min(TRANS_SEC, hold * 0.4);
       g.fillStyle = back;
       g.fillRect(0, 0, VW, VH);
       if (tr && i < n - 1 && local > hold - tr) {
@@ -1521,7 +1721,13 @@ Use lighter weights and slow down the lowering phase.`;
       $('vidPreview').src = vidUrl;
       $('vidResult').hidden = false;
       const mb = (vidBlob.size / 1048576).toFixed(1);
-      msg.textContent = `Done: ${slides.length * o.sec} s, ${mb} MB, made in ${Math.round((performance.now() - t0) / 1000)} s. Check it below, then save it.`;
+      if (o.sec === 'beat') {
+        const changes = [];
+        o.durs.slice(0, -1).reduce((acc, d) => { changes.push(acc + d); return acc + d; }, 0);
+        vidTiming = { spb: beatSec(), offset: beatOffset(), total: o.total, changes };
+        $('btnPlayBeat').hidden = false;
+      }
+      msg.textContent = `Done: ${o.total.toFixed(1).replace(/\.0$/, '')} s, ${mb} MB, made in ${Math.round((performance.now() - t0) / 1000)} s. Check it below, then save it.`;
     } catch (e) {
       console.error(e);
       msg.className = 'small vid-msg err';
@@ -1540,6 +1746,7 @@ Use lighter weights and slow down the lowering phase.`;
 
   // Export modal
   function openExport() {
+    showBeatPanel();
     updateVidInfo();
     $('exportModal').hidden = false;
     document.body.style.overflow = 'hidden';
@@ -1549,6 +1756,8 @@ Use lighter weights and slow down the lowering phase.`;
     $('exportModal').hidden = true;
     document.body.style.overflow = '';
     $('vidPreview').pause();
+    stopMetro();
+    stopClicks();
   }
   $('btnExport').onclick = openExport;
   $('exportClose').onclick = closeExport;

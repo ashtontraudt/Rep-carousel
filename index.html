@@ -147,6 +147,7 @@ bullets:
               <option value="4">4 seconds</option>
               <option value="5">5 seconds</option>
               <option value="6">6 seconds</option>
+              <option value="beat">Sync to beat</option>
             </select>
           </label>
           <label class="field"><span>Transition</span>
@@ -157,12 +158,38 @@ bullets:
             </select>
           </label>
         </div>
+        <div class="beat-panel" id="beatPanel" hidden>
+          <p class="muted small">Every slide change lands on a beat of your song. Add the same song in Instagram, starting at 0:00 of the clip you picked.</p>
+          <div class="beat-row">
+            <label class="field beat-bpm"><span>BPM</span>
+              <input id="vidBpm" type="number" min="40" max="240" step="1" inputmode="decimal" value="120">
+            </label>
+            <button class="btn primary beat-tap" id="btnTap" type="button">Tap the beat</button>
+            <button class="btn ghost" id="btnMetro" type="button">▶ Click</button>
+          </div>
+          <p class="small beat-hint" id="tapHint">Don't know the BPM? Play the song and tap the button along with the beat, 4 times or more.</p>
+          <label class="field beat-offset"><span>First beat at (seconds into the clip)</span>
+            <input id="vidOffset" type="number" min="0" max="10" step="0.05" inputmode="decimal" value="0">
+          </label>
+          <div class="beat-head">
+            <span class="small muted">Beats per slide</span>
+            <span class="beat-all">
+              <button class="btn small ghost" type="button" data-all="auto">Auto</button>
+              <button class="btn small ghost" type="button" data-all="2">All 2</button>
+              <button class="btn small ghost" type="button" data-all="4">All 4</button>
+              <button class="btn small ghost" type="button" data-all="8">All 8</button>
+            </span>
+          </div>
+          <div class="beat-list" id="beatList"></div>
+          <p class="muted small">No click sound on iPhone? Turn off silent mode.</p>
+        </div>
         <p class="muted small" id="vidLength"></p>
         <button class="btn primary" id="btnVideo" type="button">Make video</button>
         <div class="vid-progress" id="vidProgress" hidden><div id="vidBar"></div></div>
         <p class="small vid-msg" id="vidMsg" aria-live="polite"></p>
         <div class="vid-result" id="vidResult" hidden>
           <video id="vidPreview" controls playsinline muted loop></video>
+          <button class="btn" id="btnPlayBeat" type="button" hidden>▶ Play with beat clicks</button>
           <button class="btn primary" id="btnVideoSave" type="button">Save video</button>
         </div>
       </section>

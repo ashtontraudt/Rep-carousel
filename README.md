@@ -20,6 +20,13 @@ Single-page web app that turns structured text plus your uploaded images into br
   on charcoal) or a 4:5 feed video (1080×1350), 2–6 seconds per slide, swipe / fade / cut transitions.
   No audio: add music in Instagram. Made in the browser with WebCodecs, so it needs a recent Chrome
   or Edge, or Safari 17+.
+- Beat sync (Export → Reel video → Time per slide → Sync to beat): slide changes land on the beats
+  of a song. Type the BPM or tap along to the song (4+ taps), set when the first beat hits in your
+  clip, and give each slide a number of beats (Auto picks a count from how long that slide type takes
+  to read). ▶ Click plays a metronome at that BPM to check it against the song, and after making the
+  video, ▶ Play with beat clicks plays it with a click on every beat (louder on slide changes).
+  Settings save with each carousel. The video stays silent: add the same song in Instagram from 0:00
+  of the clip.
 - "Load example" fills one sample of each slide type
 
 No build step: it is static (`index.html`, `app.js`, `style.css`, local fonts and JSZip in `fonts/` and `vendor/`).
