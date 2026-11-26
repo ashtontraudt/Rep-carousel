@@ -71,7 +71,8 @@ required fields (`REQUIRED`), bad ratings, tier letters, `fit` and `corner` valu
   used by `[reference]` and by `[tiergroup]` with 3 items. `imageGrid` is the older grid used by
   `[tiergroup]` with 1, 2 or 4 items.
 - 9:16 Reel slides (`reelBlob`): the same slide drawn at `REEL_SCALE = 0.905`, centered on a 1080×1920 cream
-  frame. With `R.reel`, images that normally bleed off the edge stay inside the margins. All content must stay
+  frame. With `R.reel`, images that normally bleed off the edge stay inside the margins (except
+  `[cover]` bleed, which uses the safe zone via `opts.reelSafe`). All content must stay
   inside Instagram's Reel safe zone: nothing in the top 220px, bottom 400px or right 120px.
 - MP4 video (`makeVideo`): WebCodecs H.264 + mp4-muxer, 30 fps, reel 9:16 (slides as cards on charcoal) or
   feed 4:5, swipe / fade-through-background / cut, optional beat sync (BPM, first-beat offset, beats per
@@ -80,7 +81,8 @@ required fields (`REQUIRED`), bad ratings, tier letters, `fit` and `corner` valu
 ## Layout decisions the owner asked for (keep them)
 
 - `[cover]` `fit: contain` (default) shows the whole image between the subtitle and the bottom margin;
-  `fit: bleed` fills the bottom and runs 70px off the edge (4:5 only; never cropped in 9:16).
+  `fit: bleed` fills the bottom and runs 70px off the edge (4:5 only; never cropped in 9:16,
+  where bleed instead fills the Reel safe zone, `REEL_SAFE_SLIDE`, x 76–1004, bottom 1293 in slide coordinates).
 - `[explainer]` `corner`: right (default) / left = small corner image; center = as large as fits below the
   text. Lenient matching ("bottom left" = left, "centre" = center).
 - `[reference]`: top section (headline, number, breakdown left; target muscle right) at most 480px tall,

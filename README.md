@@ -52,7 +52,8 @@ word after it ("21 sets", "6–10 reps", "5 more days").
 
 `[cover]` takes an optional `fit`: `contain` (default) shows the whole image, scaled to fit between
 the subtitle and the 80px bottom margin, centered and sitting on that margin. `bleed` fills the bottom
-and runs off the bottom edge (cropped). The 9:16 Reel slides never crop the cover image.
+and runs off the bottom edge (cropped). The 9:16 Reel slides never crop the cover image;
+there `bleed` uses the largest uncropped size the Reel safe zone allows (a little larger than `contain`).
 
 Headlines, cover titles and accents, `[rank]` names and `[tier]` verdicts use balanced line wrapping
 (like CSS `text-wrap: balance`): same number of lines, but evenly long, so there are no lonely last
