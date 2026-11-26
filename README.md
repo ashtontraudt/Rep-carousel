@@ -67,6 +67,10 @@ The exercise grid gets all remaining space down to the bottom margin: 1 image = 
 trimmed of transparent padding, scaled as large as fits their cell without cropping, and each label sits
 12px below its image.
 
+`[tiergroup]` slides with 3 items put the images 2 on top and 1 centered below, in 440px-wide cells at
+least 300px tall (image + label) that fill the space below the items; images are trimmed of transparent
+padding and each label sits 12px below its image. To keep that space, the item text can shrink to 28px.
+
 `[explainer]` takes an optional `corner`: `right` (default) or `left` puts a small REP image in that
 bottom corner; `center` scales it as large as fits between the body text and the 80px bottom margin,
 centered horizontally and never cropped or covering text.

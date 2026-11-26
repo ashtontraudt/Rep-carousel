@@ -921,11 +921,13 @@ Use lighter weights and slow down the lowering phase.`;
         const name = parts.map((x, k) => `\u0001${x}${k === parts.length - 1 && it.reason ? ':' : ''}\u0001`).join('\n');
         return name + (it.reason ? ' ' + it.reason : '');
       });
-      const gridMin = n <= 2 ? 440 : 600; // keep the images a useful size
-      const room = BOTTOM - gridMin - 44 - y;
+      // 3 items: fixed cells (2 on top, 1 centered), each at least 300px tall incl. label -> 2 rows + 20px gap
+      const three = items.length === 3;
+      const gridMin = three ? 2 * 300 + 20 : n <= 2 ? 440 : 600; // keep the images a useful size
+      const room = BOTTOM - gridMin - (three ? 24 : 44) - y;
       const heightAt = (sz) => texts.reduce((a, t) => a + wrapRich(ctx, t, BODY, sz, io.maxW).length * sz * io.lh + gap, -gap);
       let size = 40;
-      while (size > 30 && heightAt(size) > room) size -= 2;
+      while (size > (three ? 28 : 30) && heightAt(size) > room) size -= 2; // 3 items may go a bit smaller to keep 300px rows
       let left = room;
       for (let i = 0; i < texts.length; i++) {
         const lineH = size * io.lh;
@@ -942,7 +944,13 @@ Use lighter weights and slow down the lowering phase.`;
         ctx.fillText('Add items like "- Lat Pulldown: one-line reason"', M, y + 30);
         y += 60;
       }
-      imageGrid(ctx, R, items.map((it) => it.name), Math.max(y - gap + 44, H / 2));
+      if (three) {
+        // grid takes all the space below the text: 440px-wide cells, images trimmed of transparent
+        // padding and as large as fits, labels 12px below (same cells as [reference])
+        referenceGrid(ctx, R, items.map((it) => it.name), y - gap + 24);
+      } else {
+        imageGrid(ctx, R, items.map((it) => it.name), Math.max(y - gap + 44, H / 2));
+      }
     },
 
     cta(ctx, f, R) {
