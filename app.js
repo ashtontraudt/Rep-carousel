@@ -536,7 +536,7 @@ Use lighter weights and slow down the lowering phase.`;
     return box;
   }
   function placeImage(ctx, R, slotKey, box, opts = {}) {
-    if (R.reel) {
+    if (R.reel && !opts.reelSafe) {
       // Reel slides: images that normally bleed off the slide edge stay inside the margins,
       // so nothing is cut off where the slide meets the extra cream space.
       const x0 = Math.max(box.x, M), y0 = Math.max(box.y, M);
@@ -731,7 +731,13 @@ Use lighter weights and slow down the lowering phase.`;
         const sub = f.sub.trim().replace(/^\(|\)$/g, '');
         y = richBlock(ctx, `(${sub})`, W / 2, y, BODY_O(38, 28, { lh: 1.3, maxLines: 2, align: 'center', name: 'Sub line' })).bottom;
       }
-      if (f.fit === 'bleed') {
+      if (f.fit === 'bleed' && R.reel) {
+        // 9:16: never cropped, so the image can't run off the edge. Instead it gets the largest box the
+        // Reel safe zone allows (wider and taller than the 80px margins used by contain), starting
+        // right under the subtitle, so it stays as close as possible to the 4:5 bleed size.
+        const s = REEL_SAFE_SLIDE, top = y + 40;
+        placeImage(ctx, R, 'main', { x: s.left, y: top, w: s.right - s.left, h: s.bottom - top }, { valign: 'bottom', label: 'Cover image', reelSafe: true });
+      } else if (f.fit === 'bleed') {
         // fills the bottom half and runs 70px off the bottom edge (cropped)
         const top = Math.max(y + 40, H * 0.48);
         placeImage(ctx, R, 'main', { x: 40, y: top, w: W - 80, h: H - top + 70 }, { valign: 'bottom', label: 'Cover image' });
@@ -1332,6 +1338,13 @@ Use lighter weights and slow down the lowering phase.`;
   //   content right  = 51.3 + 1000 * 0.905 ≈ 956 (≤ 960)
   const REEL = { W: 1080, H: 1920, SAFE: { top: 220, bottom: 1920 - 400, right: 1080 - 120 } };
   const REEL_SCALE = 0.905;
+  // The Reel safe zone in 1080x1350 slide coordinates (left mirrors right so images stay centered):
+  // right = (960 - 51.3) / 0.905 ≈ 1004, bottom = (1520 - 349.1) / 0.905 ≈ 1293, left = 1080 - 1004 = 76.
+  const REEL_SAFE_SLIDE = (() => {
+    const ox = (REEL.W - W * REEL_SCALE) / 2, oy = (REEL.H - H * REEL_SCALE) / 2;
+    const right = Math.floor((REEL.SAFE.right - ox) / REEL_SCALE);
+    return { left: W - right, right, bottom: Math.floor((REEL.SAFE.bottom - oy) / REEL_SCALE) };
+  })();
   function reelBlob(i) {
     const cv = document.createElement('canvas');
     cv.width = REEL.W; cv.height = REEL.H;
