@@ -129,10 +129,13 @@ bullets:
         <h3>Reel slides</h3>
         <p class="muted small">Every slide as a 1080×1920 PNG for a Reel, in order, in one ZIP. Each slide is centered on cream and kept clear of Instagram's caption, buttons and username.</p>
         <button class="btn primary" id="btnReelZip" type="button">Download Reel slides</button>
+        <p class="muted small">Or the same slides as one 1080×1920 MP4: cover 1.5 s, every other slide 2.5 s, straight cuts, no audio (add music in Instagram).</p>
+        <button class="btn" id="btnReelMp4" type="button">Download Reel MP4</button>
+        <p class="small vid-msg" id="reelMp4Msg" aria-live="polite"></p>
       </section>
       <section class="export-sec" id="pubSec">
         <h3>Publish slides</h3>
-        <p class="muted small">Saves every slide, 4:5 and 9:16, to <code id="pubFolder">posts/</code> in the GitHub repo and redeploys the site, so each slide gets a public link. Publishing again on the same day replaces that folder.</p>
+        <p class="muted small">Saves every slide, 4:5 and 9:16, plus the Reel MP4 (<code>&lt;title&gt;-reel.mp4</code>), to <code id="pubFolder">posts/</code> in the GitHub repo and redeploys the site, so each slide gets a public link. Publishing again on the same day replaces that folder.</p>
         <div class="pub-token" id="pubTokenBox">
           <p class="small">Publishing needs a GitHub token. Create a <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">fine-grained token</a> with access to <b>only the Rep-carousel repository</b> and the permission <b>Contents: Read and write</b>, then paste it here. It is kept in this browser only.</p>
           <label class="field"><span>GitHub token</span>

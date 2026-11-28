@@ -1345,7 +1345,7 @@ Use lighter weights and slow down the lowering phase.`;
     const right = Math.floor((REEL.SAFE.right - ox) / REEL_SCALE);
     return { left: W - right, right, bottom: Math.floor((REEL.SAFE.bottom - oy) / REEL_SCALE) };
   })();
-  function reelBlob(i) {
+  function reelCanvas(i) {
     const cv = document.createElement('canvas');
     cv.width = REEL.W; cv.height = REEL.H;
     const ctx = cv.getContext('2d');
@@ -1355,6 +1355,10 @@ Use lighter weights and slow down the lowering phase.`;
     ctx.setTransform(REEL_SCALE, 0, 0, REEL_SCALE, (REEL.W - sw) / 2, (REEL.H - sh) / 2);
     drawSlide(ctx, slides[i], ctxFor(i, true, true));
     ctx.setTransform(1, 0, 0, 1, 0, 0);
+    return cv;
+  }
+  function reelBlob(i) {
+    const cv = reelCanvas(i);
     return new Promise((res) => cv.toBlob(res, 'image/png'));
   }
   // Inside a claude.ai hosted page, downloads go through the host's save prompt.
@@ -1489,8 +1493,10 @@ Use lighter weights and slow down the lowering phase.`;
     pubUrls = files.map((f) => PUB.site + f.path);
     const group = (title, list) => list.length ? `<div class="pub-group"><h4>${esc(title)}</h4>${
       list.map((f) => `<a href="${esc(PUB.site + f.path)}" target="_blank" rel="noopener">${esc(PUB.site + f.path)}</a>`).join('')}</div>` : '';
-    $('pubList').innerHTML = group('Carousel 4:5 (1080×1350)', files.filter((f) => !f.reel)) + group('Reel 9:16 (1080×1920)', files.filter((f) => f.reel));
-    $('pubCount').textContent = `${files.length} slide links${live ? '' : ' (going live shortly)'}`;
+    $('pubList').innerHTML = group('Carousel 4:5 (1080×1350)', files.filter((f) => !f.reel && !f.video)) +
+      group('Reel 9:16 (1080×1920)', files.filter((f) => f.reel)) + group('Reel video MP4 (1080×1920)', files.filter((f) => f.video));
+    const nv = files.filter((f) => f.video).length;
+    $('pubCount').textContent = `${files.length - nv} slide links${nv ? ' + video' : ''}${live ? '' : ' (going live shortly)'}`;
     $('pubResult').hidden = false;
   }
   $('btnPubCopy').onclick = async () => {
@@ -1546,6 +1552,21 @@ Use lighter weights and slow down the lowering phase.`;
           files.push({ path: `${folder}/${file}`, sha: b.sha, reel });
         }
       }
+      let vidNote = '';
+      try {
+        btn.textContent = 'Making video…';
+        const vblob = await makeSlidesVideo((p) => pubMsg(`Making ${name}-reel.mp4… ${Math.round(p * 100)}%`));
+        btn.textContent = 'Uploading video…';
+        pubMsg(`Uploading ${name}-reel.mp4 (${(vblob.size / 1048576).toFixed(1)} MB)…`);
+        const b = await gh('/git/blobs', { token, method: 'POST', body: { content: await blobB64(vblob), encoding: 'base64' } });
+        files.push({ path: `${folder}/${name}-reel.mp4`, sha: b.sha, video: true });
+      } catch (e) {
+        if (e.status) throw e;
+        console.error(e);
+        vidNote = e.message === 'UNSUPPORTED'
+          ? " The MP4 was skipped: this browser can't make video (use a recent Chrome or Edge, or Safari 17+)."
+          : ' The MP4 was skipped: ' + (e.message || e) + '.';
+      }
       btn.textContent = 'Saving…';
       pubMsg('Saving to the repository…');
       const paths = new Set(files.map((f) => f.path));
@@ -1560,7 +1581,7 @@ Use lighter weights and slow down the lowering phase.`;
         const t = await gh('/git/trees', { token, method: 'POST', body: { base_tree: base.tree.sha, tree } });
         const c = await gh('/git/commits', {
           token, method: 'POST',
-          body: { message: `Publish ${folder} (${slides.length} slides, 4:5 and 9:16)`, tree: t.sha, parents: [head] },
+          body: { message: `Publish ${folder} (${slides.length} slides, 4:5 and 9:16${files.some((f) => f.video) ? ', reel MP4' : ''})`, tree: t.sha, parents: [head] },
         });
         try {
           await gh(`/git/refs/heads/${PUB.branch}`, { token, method: 'PATCH', body: { sha: c.sha, force: false } });
@@ -1572,7 +1593,7 @@ Use lighter weights and slow down the lowering phase.`;
       pubMsg('Saved. Waiting for the site to redeploy (usually about a minute)…');
       const live = await waitLive(PUB.site + files[files.length - 1].path, commitSha);
       showPubResult(files, live);
-      pubMsg(live ? 'Published. The links below are live.' : 'Saved to the repository. The site is still redeploying, so the links may take a few more minutes to work.', !live);
+      pubMsg((live ? 'Published. The links below are live.' : 'Saved to the repository. The site is still redeploying, so the links may take a few more minutes to work.') + vidNote, !live || !!vidNote);
       if (live) toast('Slides published');
     } catch (e) {
       console.error(e);
@@ -1881,6 +1902,66 @@ Use lighter weights and slow down the lowering phase.`;
     onProgress(1);
     return new Blob([muxer.target.buffer], { type: 'video/mp4' });
   }
+
+  // Reel slides MP4: the 9:16 slides exactly as in the Reel slides ZIP (reelCanvas), one after another
+  // with straight cuts, 1080x1920, 30 fps, no audio. Cover 1.5 s, every other slide (CTA included) 2.5 s.
+  const SLIDES_VID_SEC = { cover: 1.5, cta: 2.5 };
+  const SLIDES_VID_DEFAULT = 2.5;
+  const slidesVidDurs = () => slides.map((s) => SLIDES_VID_SEC[s.type] || SLIDES_VID_DEFAULT);
+  async function makeSlidesVideo(onProgress) {
+    await fontsReady;
+    const cfg = await pickCodec(REEL.W, REEL.H);
+    if (!cfg) throw new Error('UNSUPPORTED');
+    const pics = slides.map((s, i) => reelCanvas(i));
+    const muxer = new Mp4Muxer.Muxer({ target: new Mp4Muxer.ArrayBufferTarget(), video: { codec: 'avc', width: REEL.W, height: REEL.H, frameRate: VID_FPS }, fastStart: 'in-memory' });
+    let encErr = null;
+    const enc = new VideoEncoder({ output: (chunk, meta) => muxer.addVideoChunk(chunk, meta), error: (e) => { encErr = e; } });
+    enc.configure(cfg);
+    // whole frames per slide, rounded on the running total so the cuts land on the right times
+    const ends = [];
+    slidesVidDurs().reduce((acc, d, k) => { ends[k] = Math.round((acc + d) * VID_FPS); return acc + d; }, 0);
+    const total = ends[ends.length - 1];
+    let i = 0, startOf = 0;
+    for (let f = 0; f < total; f++) {
+      if (encErr) throw encErr;
+      while (f >= ends[i]) { startOf = ends[i]; i++; }
+      const vf = new VideoFrame(pics[i], { timestamp: Math.round((f * 1e6) / VID_FPS), duration: Math.round(1e6 / VID_FPS) });
+      enc.encode(vf, { keyFrame: f === startOf || (f - startOf) % (VID_FPS * 2) === 0 });
+      vf.close();
+      while (enc.encodeQueueSize > 6) await new Promise((r) => setTimeout(r, 4));
+      if (f % 10 === 0) { onProgress(f / total); await new Promise((r) => setTimeout(r, 0)); }
+    }
+    await enc.flush();
+    if (encErr) throw encErr;
+    enc.close();
+    muxer.finalize();
+    onProgress(1);
+    return new Blob([muxer.target.buffer], { type: 'video/mp4' });
+  }
+  $('btnReelMp4').onclick = async () => {
+    if (vidBusy || pubBusy) return;
+    if (!(await preflight())) return;
+    const btn = $('btnReelMp4'), msg = $('reelMp4Msg'), old = btn.textContent;
+    vidBusy = true;
+    btn.disabled = true;
+    msg.className = 'small vid-msg';
+    try {
+      const blob = await makeSlidesVideo((p) => { btn.textContent = `Making video… ${Math.round(p * 100)}%`; });
+      const secs = slidesVidDurs().reduce((a, b) => a + b, 0);
+      msg.textContent = `${secs.toFixed(1).replace(/\.0$/, '')} s, ${(blob.size / 1048576).toFixed(1)} MB.`;
+      if (await saveBlob(blob, `${coverName()}-reel.mp4`)) toast('Reel MP4 downloaded');
+    } catch (e) {
+      console.error(e);
+      msg.className = 'small vid-msg err';
+      msg.textContent = e.message === 'UNSUPPORTED'
+        ? "This browser can't make MP4 video. Use a recent Chrome or Edge on a computer, or Safari 17 or newer."
+        : 'Video export failed: ' + (e.message || e);
+    } finally {
+      vidBusy = false;
+      btn.disabled = false;
+      btn.textContent = old;
+    }
+  };
 
   function vidFileName(o) { return `${coverName()}-${o.format === 'reel' ? 'reel' : 'feed'}.mp4`; }
 
