@@ -100,6 +100,9 @@ Image library in IndexedDB (`rep-carousel` DB, stores `images` and `carousels`) 
 expressions; carousel auto-save (working copy in localStorage `rep.work`, saved list in IndexedDB with
 localStorage fallback), New / Saved (open, duplicate, delete); Export dialog with Download ZIP (4:5), Download
 Reel slides (9:16 ZIP) and Reel video; ZIPs and files named after the cover title in slide order.
+Export → Publish slides commits both PNG sets to `posts/<cover-title>-<date>/` on `main` via the GitHub
+Git Data API (one commit, token in localStorage `rep.ghToken`), which redeploys Pages; `posts/` is
+owner content, so never delete or rewrite it in feature branches.
 Use the in-page `ask()` dialog, never `confirm()`/`alert()` (blocked in sandboxed hosts).
 
 ## Conventions when changing things

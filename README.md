@@ -16,6 +16,14 @@ Single-page web app that turns structured text plus your uploaded images into br
   (`<cover-title>-reel-01.png`, …). The 4:5 design is scaled to 90.5% and centered vertically on cream,
   so all content stays inside Instagram's Reel safe zone (clear of the top 220px, bottom 400px and
   right 120px). Images that bleed off the edge in the 4:5 version stay inside the margins here.
+- Publish slides (Export → Publish slides): renders every slide in both sizes and commits them in one
+  commit to `posts/<cover-title>-<YYYY-MM-DD>/` on `main` (`<cover-title>-01.png` … for 4:5,
+  `<cover-title>-reel-01.png` … for 9:16). That push redeploys GitHub Pages, so each slide gets a public
+  URL like `https://ashtontraudt.github.io/Rep-carousel/posts/<folder>/<file>.png`; the dialog lists
+  them (with Copy all links) and waits until they are live. Publishing the same cover title again on
+  the same day replaces that folder. Needs a fine-grained GitHub token limited to the Rep-carousel
+  repository with Contents: Read and write; it is stored in that browser's localStorage only
+  (Forget token removes it). Each publish adds roughly 1–2 MB per slide to the repo.
 - Reel video export (Export → Reel video): MP4 (H.264, 30 fps) as a 9:16 reel (1080×1920, slides
   on charcoal) or a 4:5 feed video (1080×1350), 2–6 seconds per slide, swipe / fade / cut transitions.
   No audio: add music in Instagram. Made in the browser with WebCodecs, so it needs a recent Chrome

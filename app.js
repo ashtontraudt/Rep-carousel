@@ -1424,6 +1424,167 @@ Use lighter weights and slow down the lowering phase.`;
 
 
 
+  // ---------- Publish slides (GitHub repo + Pages) ----------
+  // Commits every slide (4:5 and 9:16) to posts/<cover-title>-<date>/ on main in one commit. A push to main
+  // is the GitHub Pages deploy, so each slide then has a public URL under PUB.site. Uses the Git Data API
+  // (blobs -> tree -> commit -> ref) with a fine-grained token kept in localStorage on this device only.
+  const PUB = {
+    owner: 'ashtontraudt', repo: 'Rep-carousel', branch: 'main',
+    site: 'https://ashtontraudt.github.io/Rep-carousel/', api: 'https://api.github.com',
+  };
+  let pubBusy = false, pubUrls = [];
+  const pubToken = () => LS.get('rep.ghToken', '') || '';
+  function localDate() {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+  const pubFolder = () => `posts/${coverName()}-${localDate()}`;
+  function showPubToken() {
+    const has = !!pubToken();
+    $('pubTokenBox').hidden = has;
+    $('pubTokenSaved').hidden = !has;
+    $('pubFolder').textContent = pubFolder() + '/';
+  }
+  $('pubForget').onclick = () => {
+    try { localStorage.removeItem('rep.ghToken'); } catch { /* ignore */ }
+    $('pubToken').value = '';
+    showPubToken();
+  };
+  async function gh(path, opts = {}) {
+    const r = await fetch(`${PUB.api}/repos/${PUB.owner}/${PUB.repo}${path}`, {
+      method: opts.method || 'GET',
+      headers: {
+        Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28',
+        Authorization: `Bearer ${opts.token}`, ...(opts.body ? { 'Content-Type': 'application/json' } : {}),
+      },
+      body: opts.body ? JSON.stringify(opts.body) : undefined,
+      cache: 'no-store',
+    });
+    if (opts.allow404 && r.status === 404) return null;
+    if (!r.ok) {
+      let m = '';
+      try { m = (await r.json()).message || ''; } catch { /* ignore */ }
+      const e = new Error(m || `GitHub error ${r.status}`);
+      e.status = r.status;
+      throw e;
+    }
+    return r.json();
+  }
+  function blobB64(blob) {
+    return new Promise((res, rej) => {
+      const fr = new FileReader();
+      fr.onload = () => res(String(fr.result).slice(String(fr.result).indexOf(',') + 1));
+      fr.onerror = () => rej(fr.error);
+      fr.readAsDataURL(blob);
+    });
+  }
+  function pubError(e) {
+    if (e.status === 401) return 'GitHub did not accept the token. Check it or make a new one, then paste it again.';
+    if (e.status === 403 || e.status === 404) return `The token can't write to ${PUB.repo}. It needs access to the Rep-carousel repository with Contents: Read and write.`;
+    if (e instanceof TypeError) return 'Could not reach GitHub. Check your connection and try again.';
+    return 'Publishing failed: ' + e.message;
+  }
+  function pubMsg(msg, err) { $('pubMsg').textContent = msg; $('pubMsg').classList.toggle('err', !!err); }
+  function showPubResult(files, live) {
+    pubUrls = files.map((f) => PUB.site + f.path);
+    const group = (title, list) => list.length ? `<div class="pub-group"><h4>${esc(title)}</h4>${
+      list.map((f) => `<a href="${esc(PUB.site + f.path)}" target="_blank" rel="noopener">${esc(PUB.site + f.path)}</a>`).join('')}</div>` : '';
+    $('pubList').innerHTML = group('Carousel 4:5 (1080×1350)', files.filter((f) => !f.reel)) + group('Reel 9:16 (1080×1920)', files.filter((f) => f.reel));
+    $('pubCount').textContent = `${files.length} slide links${live ? '' : ' (going live shortly)'}`;
+    $('pubResult').hidden = false;
+  }
+  $('btnPubCopy').onclick = async () => {
+    try { await navigator.clipboard.writeText(pubUrls.join('\n')); toast('Links copied'); }
+    catch { toast('Could not copy. Select the links and copy them by hand.'); }
+  };
+  // Waits until GitHub Pages serves the new commit (checked on one of the new files, cache-busted).
+  async function waitLive(url, sha) {
+    const until = Date.now() + 6 * 60 * 1000;
+    while (Date.now() < until) {
+      try {
+        const r = await fetch(`${url}?v=${sha.slice(0, 7)}-${Date.now()}`, { method: 'HEAD', cache: 'no-store' });
+        if (r.ok) return true;
+      } catch { /* not there yet, or the request was blocked */ }
+      await new Promise((r) => setTimeout(r, 5000));
+    }
+    return false;
+  }
+  $('btnPublish').onclick = publish;
+  async function publish() {
+    if (pubBusy) return;
+    const typed = $('pubToken').value.trim();
+    const token = typed || pubToken();
+    if (!token) { pubMsg('Paste a GitHub token first.', true); $('pubToken').focus(); return; }
+    if (!(await preflight())) return;
+    const btn = $('btnPublish'), old = btn.textContent;
+    pubBusy = true;
+    btn.disabled = true;
+    $('pubResult').hidden = true;
+    const folder = pubFolder(), name = coverName();
+    try {
+      await fontsReady;
+      pubMsg('Checking the repository…');
+      const ref = await gh(`/git/ref/heads/${PUB.branch}`, { token });
+      if (typed) { LS.set('rep.ghToken', typed); $('pubToken').value = ''; showPubToken(); }
+      const existing = await gh(`/contents/${folder}?ref=${PUB.branch}`, { token, allow404: true });
+      const oldFiles = Array.isArray(existing) ? existing.filter((x) => x.type === 'file').map((x) => x.path) : [];
+      if (oldFiles.length && !(await ask(`${folder}/ was already published today. Replace it with these slides? Its old links will show the new slides.`, 'Replace'))) {
+        pubMsg('');
+        return;
+      }
+      const files = [];
+      const total = slides.length * 2;
+      for (const reel of [false, true]) {
+        for (let i = 0; i < slides.length; i++) {
+          const n = files.length + 1;
+          btn.textContent = `Rendering ${n}/${total}`;
+          pubMsg(`Rendering and uploading slide ${n} of ${total}…`);
+          const file = `${name}${reel ? '-reel' : ''}-${String(i + 1).padStart(2, '0')}.png`;
+          const blob = await (reel ? reelBlob(i) : exportBlob(i));
+          btn.textContent = `Uploading ${n}/${total}`;
+          const b = await gh('/git/blobs', { token, method: 'POST', body: { content: await blobB64(blob), encoding: 'base64' } });
+          files.push({ path: `${folder}/${file}`, sha: b.sha, reel });
+        }
+      }
+      btn.textContent = 'Saving…';
+      pubMsg('Saving to the repository…');
+      const paths = new Set(files.map((f) => f.path));
+      const tree = [
+        ...files.map((f) => ({ path: f.path, mode: '100644', type: 'blob', sha: f.sha })),
+        ...oldFiles.filter((p) => !paths.has(p)).map((p) => ({ path: p, mode: '100644', type: 'blob', sha: null })),
+      ];
+      let commitSha = null, head = ref.object.sha;
+      for (let attempt = 0; attempt < 3 && !commitSha; attempt++) {
+        if (attempt) head = (await gh(`/git/ref/heads/${PUB.branch}`, { token })).object.sha;
+        const base = await gh(`/git/commits/${head}`, { token });
+        const t = await gh('/git/trees', { token, method: 'POST', body: { base_tree: base.tree.sha, tree } });
+        const c = await gh('/git/commits', {
+          token, method: 'POST',
+          body: { message: `Publish ${folder} (${slides.length} slides, 4:5 and 9:16)`, tree: t.sha, parents: [head] },
+        });
+        try {
+          await gh(`/git/refs/heads/${PUB.branch}`, { token, method: 'PATCH', body: { sha: c.sha, force: false } });
+          commitSha = c.sha;
+        } catch (e) { if (e.status !== 422 || attempt === 2) throw e; } // main moved meanwhile: rebuild on top of it
+      }
+      showPubResult(files, false);
+      btn.textContent = 'Deploying…';
+      pubMsg('Saved. Waiting for the site to redeploy (usually about a minute)…');
+      const live = await waitLive(PUB.site + files[files.length - 1].path, commitSha);
+      showPubResult(files, live);
+      pubMsg(live ? 'Published. The links below are live.' : 'Saved to the repository. The site is still redeploying, so the links may take a few more minutes to work.', !live);
+      if (live) toast('Slides published');
+    } catch (e) {
+      console.error(e);
+      if (e.status === 401) { $('pubForget').onclick(); $('pubToken').value = typed; }
+      pubMsg(pubError(e), true);
+    } finally {
+      pubBusy = false;
+      btn.disabled = false;
+      btn.textContent = old;
+    }
+  }
+
   // ---------- Reel video export (WebCodecs H.264 + MP4) ----------
   const VID_FPS = 30;
   const TRANS_SEC = 0.5;
@@ -1768,12 +1929,13 @@ Use lighter weights and slow down the lowering phase.`;
   // Export modal
   function openExport() {
     showBeatPanel();
+    showPubToken();
     updateVidInfo();
     $('exportModal').hidden = false;
     document.body.style.overflow = 'hidden';
   }
   function closeExport() {
-    if (vidBusy) return;
+    if (vidBusy || pubBusy) return;
     $('exportModal').hidden = true;
     document.body.style.overflow = '';
     $('vidPreview').pause();
